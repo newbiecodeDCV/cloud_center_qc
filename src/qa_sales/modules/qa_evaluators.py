@@ -32,7 +32,7 @@ class QASalesEvaluator:
 
     def process_result(self, results: List[Dict]):
         # Process the result from the evaluation
-        detail_result = "Đánh giá kỹ năng bán hàng theo các tiêu chí:\n"
+        detail_result = "II. Đánh giá kỹ năng bán hàng theo các tiêu chí:\n"
         final_score = 0.0
         for item in results:
             criteria_id = item['criteria_id']
@@ -41,7 +41,8 @@ class QASalesEvaluator:
             note = item.get('Note', '')
             score = item.get('score', 0)
             final_score += score
-            detail_result += f"Tiêu chí: {criteria_name}, đánh giá: {status}, điểm: {score}, nhận xét: {note}"
+            detail_result += f"\t + Tiêu chí: {criteria_name}, đánh giá: {status}, điểm: {score}, nhận xét:\n{note} \n"
+        final_score = round(final_score, 2)
         return detail_result, final_score
 
     async def run_evaluate(self,

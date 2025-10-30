@@ -1,5 +1,8 @@
 import base64
 import hashlib
+import magic
+import json
+import urllib.parse
 
 
 def hash_str(string: str, n_hash: int = 9) -> int:
@@ -47,3 +50,26 @@ def seconds_to_min_sec(seconds):
     minutes = int(seconds) // 60
     secs = int(seconds) % 60
     return f"{minutes}:{secs:02d}"
+
+
+def is_url(string):
+    """
+    Check if string is a valid url
+    """
+    try:
+        result = urllib.parse.urlparse(string)
+        return bool(result.scheme) and bool(result.netloc)
+    except Exception:
+        return False
+
+
+def is_audio_file(file_bytes):
+    mime = magic.Magic(mime=True)
+    mime_type = mime.from_buffer(file_bytes)
+    return mime_type.startswith('audio')
+
+
+def write_json(data: dict,
+               json_file_path: str):
+    with open(json_file_path, 'w') as file:
+        json.dump(data, file, indent=4)

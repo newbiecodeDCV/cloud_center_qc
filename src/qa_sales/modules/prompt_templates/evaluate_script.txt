@@ -11,9 +11,32 @@
 		- Tiêu chí: tên tiêu chí
 		- Đánh giá: Đạt hoặc không đạt
 		- Note: Nếu đạt thì chỉ rõ ra đã đạt được những hành động gì, nếu không đạt cũng chỉ rõ ra những hành động nào chưa làm được
-        - Bước 5.3: Trả về output theo đúng format sau được định nghĩa sau đây, ngoài ra tuyệt đối không trả về thêm gì khác:
-        Format trả về là một list các python dictionary có dạng:
-        [{{'criteria_id': (số thứ tự của tiêu chí), 'status': (1 nếu được đánh giá là "Đạt", 0 nếu là "Không đạt"), 'Note': Note đi kèm của tiêu chí đó}}]
+		Chú ý, nếu tiêu chí nào đó mà không có lời thoại nào tương ứng với nó thì cũng liệt kê đầy đủ ra và đánh giá là không đạt.
+        - Bước 5.3: Trả về output **chính xác theo định dạng bắt buộc dưới đây**. 
+		  Tuyệt đối **không được viết thêm bất kỳ ký tự, dấu ``` hoặc văn bản nào khác ngoài kết quả JSON hợp lệ**.
+
+		  ** Định dạng bắt buộc:
+		  Kết quả phải là **một list hợp lệ của Python (hoặc JSON array)**, trong đó mỗi phần tử là một dictionary có đúng ba trường sau:
+		  [
+		      {{
+			  "criteria_id": <số thứ tự của tiêu chí, dạng int>,
+			  "status": <1 nếu được đánh giá là 'Đạt', 0 nếu là 'Không đạt'>,
+			  "Note": "Các ý ghi dưới dạng gạch đầu dòng, mỗi ý một dòng, không dùng ngoặc. Ví dụ:\n- Đã thực hiện hành động A\n- Còn thiếu hành động B\n- Diễn đạt đúng tinh thần tiêu chí"
+		      }},
+		      {{
+			  "criteria_id": <số thứ tự của tiêu chí kế tiếp>,
+			  "status": <1 hoặc 0>,
+			  "Note": "- Mô tả chi tiết theo từng gạch đầu dòng\n- Không có dấu ngoặc hoặc ký tự đặc biệt"
+		      }},
+		      ...
+		  ]
+
+		  ** Yêu cầu bắt buộc:
+		  - Không thêm bất kỳ mô tả, tiêu đề, markdown, dấu ``` hoặc text giải thích nào khác ngoài danh sách JSON trên.
+		  - Đảm bảo JSON có thể parse trực tiếp bằng `json.loads()`.
+		  - Các `criteria_id` phải được sắp xếp theo thứ tự tăng dần.
+		  - Trường "Note" phải luôn có, không được bỏ trống.
+		  - Nội dung trong "Note" chỉ được sử dụng dấu gạch đầu dòng (-), không có dấu ngoặc, không bao quanh bởi dấu nháy kép hoặc dấu ngoặc đơn
 
 [Sale Desc]: Lời thoại của nhân viên được chia vào các tiêu chí tương ứng. Cấu trúc có dạng như sau:
 	criteria ID: số thứ tự của tiêu chí

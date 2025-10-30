@@ -9,7 +9,7 @@ load_dotenv()
 
 # Lấy thông tin cấu hình từ biến môi trường
 API_KEY = os.getenv("OPENAI_API_KEY")
-API_BASE_URL = os.getenv("OPENAI_BASE_URL")
+API_BASE_URL = os.getenv("BASE_URL")
 MODEL_NAME = os.getenv("MODEL_NAME")
 
 # Khởi tạo client OpenAI với cấu hình tùy chỉnh
