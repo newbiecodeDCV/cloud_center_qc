@@ -26,7 +26,7 @@ def create_task_id(audio_bytes: bytes = None, url: str = None):
     - url: (tùy chọn) Đường dẫn URL đến file âm thanh.
 
     Trả về:
-    - Số nguyên task_id (6 chữ số).
+    - Số nguyên task_id (10 chữ số).
     """
     if audio_bytes:
         # NOTE(by ducnt2): using base64 format to avoid errors when hassing
@@ -39,7 +39,8 @@ def create_task_id(audio_bytes: bytes = None, url: str = None):
         raise ValueError("Cần cung cấp 'audio_bytes' hoặc 'url' để tạo task_id")
 
     task_id = f"{audio_id}"
-    task_id = int(f"{hash_str(task_id, 6)}")
+    task_id = int(f"{hash_str(task_id, 10)}")
+    return task_id
 
 
 def seconds_to_min_sec(seconds):

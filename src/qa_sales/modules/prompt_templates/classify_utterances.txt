@@ -7,8 +7,9 @@
 - Bước 5: Thực hiện các bước sau:
 	- Bước 5.1: Dựa vào thứ tự lời thoại, nội dung lời thoại và mô tả tiêu chí (criteria Description), xác định xem lời thoại nào ứng với tiêu chí nào. Chú ý: các tiêu được sắp xếp theo thứ tự từ đầu tới cuối của cuộc gọi
 	- Bước 5.2: Trả về output theo đúng format sau được định nghĩa sau đây, ngoài ra tuyệt đối không trả về thêm gì khác:
-        Format trả về là một list các python dictionary, mỗi dict tương ứng với thông tin của một tiêu chí có dạng:
-        [{{'criteria_id': (số thứ tự của tiêu chí), 'utterance': [danh sách chứa trường text các câu thoại tương ứng]}}] 
+        Format trả về là một list các python dictionary hợp lệ, mỗi dict tương ứng với thông tin của một tiêu chí có dạng:
+        [{{'criteria_id': (số thứ tự của tiêu chí), 'utterance': [danh sách chứa trường text các câu thoại tương ứng]}}].
+        Lưu ý bắt buộc sắp xếp các tiêu chí theo thứ tự
 
 [Sale Desc]: Lời thoại của nhân viên có dạng một list các python dictionary. Mỗi dictonary gồm những trường thông tin sau:  
         - start: Thời điểm bắt đầu,
