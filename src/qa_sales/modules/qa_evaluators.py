@@ -41,7 +41,7 @@ class QASalesEvaluator:
             note = item.get('Note', '')
             score = item.get('score', 0)
             final_score += score
-            detail_result += f"\t + Tiêu chí: {criteria_name}, đánh giá: {status}, điểm: {score}, nhận xét:\n{note} \n"
+            detail_result += f"+ Tiêu chí: {criteria_name}, đánh giá: {status}, điểm: {score}, nhận xét:\n{note} \n"
         final_score = round(final_score, 2)
         return detail_result, final_score
 
