@@ -81,15 +81,18 @@ async def post(request: Request, bg_task: BackgroundTasks):
     os.makedirs(save_path, exist_ok=True)
     request = await request.form()
     file = request["file"]
+    task_id = request.get("task_id", None)
     try:
         if is_url(file):
-            task_id = create_task_id(url=file)
+            if task_id is None:
+                task_id = create_task_id(url=file)
             audio_bytes = urlopen(file).read()
         else:
             bytes = await file.read()
             if is_audio_file(bytes):
                 await file.seek(0)
-                task_id = create_task_id(audio_bytes=bytes)
+                if task_id is None:
+                    task_id = create_task_id(audio_bytes=bytes)
                 audio_bytes = bytes
             else:
                 return JSONResponse({
