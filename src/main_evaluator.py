@@ -74,10 +74,18 @@ class QAMainEvaluator:
             detail_result += f"+ Tổng điểm: {tong_diem}\n"
             detail_result += f"+ Lý do: {ly_do}\n"
 
-            return {'detail_result': detail_result, 'score': tong_diem, 'status': 1}
+            return {'detail_result': detail_result,
+                    'score': tong_diem,
+                    'status': 1,
+                    'segments': analysis_result.get('segments')}
         except Exception as e:
             logger.error(f"Error evaluating communication: {e}")
-            return {'detail_result': str(e), 'score': -1, 'status': -1}
+            return {
+                'detail_result': str(e),
+                'score': -1,
+                'status': -1,
+                'segments': []
+            }
 
     async def evaluate_sale_skills(self,
                                    audio_bytes: bytes,
@@ -101,23 +109,32 @@ class QAMainEvaluator:
         """
         Run the full evaluation process: communication quality and sales skills.
         """
-        communication_result = await self.evaluate_communication(audio_bytes, task_id)
-        if communication_result['status'] != 1:
+        try:
+            communication_result = await self.evaluate_communication(audio_bytes, task_id)
+            if communication_result['status'] != 1:
+                return {'status': -1,
+                        'message': communication_result['detail_result'],
+                        'final_detail_result': None,
+                        'code': 500}
+            communication_detail, communication_score = communication_result['detail_result'], communication_result['score']
+            sales_skills_result = await self.evaluate_sale_skills(audio_bytes, task_id)
+            if sales_skills_result['status'] != 1:
+                return {'status': -1,
+                        'message': sales_skills_result['detail_result'],
+                        'final_detail_result': None,
+                        'code': 500}
+            sales_skills_result, sales_skills_score = sales_skills_result['detail_result'], sales_skills_result['score']
+            total_score = communication_score + sales_skills_score
+            final_detail_result = f"{communication_detail}\n{sales_skills_result}\nTổng điểm cuối cùng: {total_score}"
+            return {'status': 1,
+                    'message': 'Evaluation completed successfully',
+                    'final_detail_result': final_detail_result,
+                    'segments': communication_result['segments'],
+                    'code': 200}
+        except Exception as e:
+            logger.error(f"Error in run_evaluate: {e}")
             return {'status': -1,
-                    'message': communication_result['detail_result'],
+                    'message': str(e),
                     'final_detail_result': None,
+                    'segments': [],
                     'code': 500}
-        communication_result, communication_score = communication_result['detail_result'], communication_result['score']
-        sales_skills_result = await self.evaluate_sale_skills(audio_bytes, task_id)
-        if sales_skills_result['status'] != 1:
-            return {'status': -1,
-                    'message': sales_skills_result['detail_result'],
-                    'final_detail_result': None,
-                    'code': 500}
-        sales_skills_result, sales_skills_score = sales_skills_result['detail_result'], sales_skills_result['score']
-        total_score = communication_score + sales_skills_score
-        final_detail_result = f"{communication_result}\n{sales_skills_result}\nTổng điểm cuối cùng: {total_score}"
-        return {'status': 1,
-                'message': 'Evaluation completed successfully',
-                'final_detail_result': final_detail_result,
-                'code': 200}

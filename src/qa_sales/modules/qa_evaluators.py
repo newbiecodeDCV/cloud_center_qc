@@ -56,15 +56,15 @@ class QASalesEvaluator:
             return {'status': -1,
                     'message': 'Failed to get dialogue from audio'}
         # Process dialogue to extract speaker roles and classify utterances
-        processed_result = self.dialogue_processor(dialogue=dialogue_result['dialogue'],
-                                                   prompt_template=self.pre_prompt_template)
+        processed_result = await self.dialogue_processor(dialogue=dialogue_result['dialogue'],
+                                                         prompt_template=self.pre_prompt_template)
 
         if processed_result['status'] != 1:
             return {'status': -1,
                     'message': 'Failed to process dialogue'}
 
         # Evaluate
-        results = self.script_evaluator(dialogue=processed_result['dialogue'])
+        results = await self.script_evaluator(dialogue=processed_result['dialogue'])
 
         if results['status'] != 1:
             return {'status': -1,

@@ -21,7 +21,7 @@
 		      {{
 			  "criteria_id": <số thứ tự của tiêu chí, dạng int>,
 			  "status": <1 nếu được đánh giá là 'Đạt', 0 nếu là 'Không đạt'>,
-			  "Note": "Các ý ghi dưới dạng gạch đầu dòng, mỗi ý một dòng, không dùng ngoặc. Ví dụ:\n- Đã thực hiện hành động A\n- Còn thiếu hành động B\n- Diễn đạt đúng tinh thần tiêu chí"
+			  "Note": "Các ý ghi dưới dạng gạch đầu dòng, mỗi ý một dòng, không dùng ngoặc. Trích dẫn kèm lời thoại làm căn cứ. Ví dụ:\n- Đã thực hiện hành động A\n- Còn thiếu hành động B\n- Diễn đạt đúng tinh thần tiêu chí"
 		      }},
 		      {{
 			  "criteria_id": <số thứ tự của tiêu chí kế tiếp>,

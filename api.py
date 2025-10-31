@@ -5,12 +5,12 @@ from loguru import logger
 from src.qa_communicate.core.utils import is_url, is_audio_file, create_task_id, write_json
 from urllib.request import urlopen
 from src.main_evaluator import QAMainEvaluator
+from time import perf_counter
 import uvicorn
-import json
 import jwt
-import sys
 import os
 import argparse
+
 
 app = FastAPI()
 PRIVATE_TOKEN = "41ad97aa3c747596a4378cc8ba101fe70beb3f5f70a75407a30e6ddab668310d"
@@ -23,11 +23,15 @@ async def get_qa(audio_bytes: bytes,
     rs = {"status": 0, "task_id": task_id, "result": {},
           "message": "Start evaluating", "code": 202}
     write_json(rs, running_json_file_path)
+    start = perf_counter()
     result = await main_evaluator.run_evaluate(audio_bytes=audio_bytes,
                                                task_id=task_id)
+    end = perf_counter()
     rs = {"status": result['status'],
           "task_id": task_id,
+          "inference_time": round(end - start, 2),
           "result": result.get('final_detail_result', {}),
+          "segments": result.get('segments', []),
           "message": result['message'],
           "code": result['code']}
     if result['status'] == 1:
@@ -35,6 +39,7 @@ async def get_qa(audio_bytes: bytes,
     else:
         logger.error(f"Task {task_id} failed with message: {result['message']}")
     write_json(rs, done_json_file_path)
+
 
 @app.get("/")
 def get():

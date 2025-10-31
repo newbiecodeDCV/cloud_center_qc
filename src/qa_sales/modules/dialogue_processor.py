@@ -1,6 +1,5 @@
 from typing import List, Dict, Any
-from langchain_community.vectorstores import Chroma
-from litellm import completion
+from litellm import completion, acompletion
 from dotenv import load_dotenv
 from logging import basicConfig, getLogger, INFO
 import os
@@ -21,9 +20,9 @@ openai.base_url = base_url
 
 class DialogueProcessor:
 
-    def extract_speaker_roles(self,
-                              prompt_template: str,
-                              dialogue: List[Dict[str, Any]]):
+    async def extract_speaker_roles(self,
+                                    prompt_template: str,
+                                    dialogue: List[Dict[str, Any]]):
         """Extract speaker roles from the dialogue.
 
         Args:
@@ -38,7 +37,7 @@ class DialogueProcessor:
         prompt = open(prompt_template).read().format(dialogue=dialogue)
         messages = [{"role": "user", "content": prompt}]
         
-        response = completion(
+        response = await acompletion(
             model="gpt-4.1-mini",
             messages=messages,
             temperature=0.0,
@@ -66,10 +65,11 @@ class DialogueProcessor:
         #         "message": "Failed to extract speaker roles"
         #     }
 
-    def __call__(self,
-                 prompt_template: str,
-                 dialogue: List[Dict[str, Any]]):
-        result = self.extract_speaker_roles(prompt_template=prompt_template,
-                                            dialogue=dialogue)
+    async def __call__(self,
+                       prompt_template: str,
+                       dialogue: List[Dict[str, Any]]):
+        result = await self.extract_speaker_roles(prompt_template=prompt_template,
+                                                  dialogue=dialogue)
         return result
+
 

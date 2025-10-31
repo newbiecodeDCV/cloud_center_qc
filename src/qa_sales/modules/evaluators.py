@@ -29,12 +29,12 @@ class ScriptEvaluator:
         self.criteria_score = dict(zip(df['criteria_id'], df['criteria_score']))
         self.step_detail = self.from_db_to_text(chroma_db=chroma_db)
 
-    def classify_utterances_to_criteria(self,
-                                        utterances: List[Dict[str, Any]],) -> List[Dict[str, Any]]:
+    async def classify_utterances_to_criteria(self,
+                                              utterances: List[Dict[str, Any]],) -> List[Dict[str, Any]]:
 
         chain = self.classify_prompt | self.llm
-        response = chain.invoke({'sale_texts': utterances,
-                                 'step_detail': self.step_detail})
+        response = await chain.ainvoke({'sale_texts': utterances,
+                                       'step_detail': self.step_detail})
 
         sale_texts = literal_eval(response.content)
         return sale_texts
@@ -70,12 +70,12 @@ class ScriptEvaluator:
             criteria_eval['score'] = criteria_score.get(criteria_id, 0) * int(criteria_eval['status'])
         return criteria_evals
 
-    def __call__(self,
-                 dialogue: List[Dict[str, Any]]) -> str:
+    async def __call__(self,
+                       dialogue: List[Dict[str, Any]]) -> str:
         # try:
         chain = self.eval_prompt | self.llm
-        sale_texts = self.classify_utterances_to_criteria(utterances=dialogue)
-        response = chain.invoke({
+        sale_texts = await self.classify_utterances_to_criteria(utterances=dialogue)
+        response = await chain.ainvoke({
             "sale_texts": sale_texts,
             "step_detail": self.step_detail
         })
