@@ -4,8 +4,17 @@ import os
 from pydub import AudioSegment
 from src.qa_communicate.audio_processing.qa import call_qa_api
 from src.qa_communicate.core.utils import create_task_id
+from fastapi import FastAPI
+import fastapi
 import argparse
+import uvicorn
 
+
+app = FastAPI()
+
+
+def get_root_url(request: fastapi.Request, route_path: str, root_path) -> str:
+    return "https://speech.aiservice.vn/asr/cloud_qa_demo"
 
 async def process_audio_and_evaluate(audio_file_path, progress=gr.Progress()):
     """Xử lý audio qua API"""
@@ -37,10 +46,11 @@ async def process_audio_and_evaluate(audio_file_path, progress=gr.Progress()):
     if result.get('status') != 1:
         error_msg = result.get('message', 'Không xác định')
         return f"❌ Lỗi từ API: {error_msg}"
-    dialogue_report = result.get('dialogue', '')
+    dialogue_report = result.get('result', '')
+    task_id = result.get('task_id', '')
     report_lines = []
     report_lines.append("╔════════════════════════════════════════════════════════════════╗")
-    report_lines.append("║              📊 BÁO CÁO ĐÁNH GIÁ CUỘC GỌI QA                  ║")
+    report_lines.append(f"║              📊 BÁO CÁO ĐÁNH GIÁ.ID cuộc gọi: {task_id}       ║")
     report_lines.append("╚════════════════════════════════════════════════════════════════╝")
     report_lines.append("")
     if dialogue_report:
@@ -90,37 +100,46 @@ custom_css = """
 }
 """
 
-with gr.Blocks(title="QA Audio Processor", theme=gr.themes.Soft(), css=custom_css) as demo:
+with gr.Blocks(title="Demo đánh giá chất lượng cuộc gọi", theme=gr.themes.Soft(), css=custom_css) as demo:
     # Header
     with gr.Row(elem_classes="main-header"):
         gr.Markdown("""
-        #  Admicro-Bizfly QC 
+        #  Demo đánh giá chất lượng cuộc gọi 
         """)
     with gr.Row():
         with gr.Column(scale=2):
-            gr.Markdown("## 📤 Tải lên file âm thanh")
+            gr.Markdown("## 📤 Bước 1: Tải lên file audio")
             audio_input = gr.Audio(
                 label="🎙️ Chọn file audio (.wav, .mp3, .m4a)",
                 type="filepath",
                 elem_classes="audio-input"
             )
             analyze_btn = gr.Button(
-                "🚀 Bắt đầu Xử lý",
+                "🚀 Bắt đầu xử lý",
                 variant="primary",
                 size="lg",
                 elem_classes="analyze-button"
             )
             with gr.Group(elem_classes="info-box"):
-                gr.Markdown("""
-                ### 📋 Hướng dẫn sử dụng:
+                gr.Markdown("""### 📋 Hướng dẫn sử dụng:
+                
                 1. 📁 **Tải file**: Chọn file audio từ máy tính
                 2. ▶️ **Bắt đầu**: Nhấn nút "Bắt đầu Xử lý"
                 3. ⏳ **Chờ đợi**: Quá trình xử lý 1-2 phút
                 4. ✅ **Kết quả**: Xem báo cáo bên phải
-                ---
-                """)
+		5. **Những chức năng đã có**
+		- [x] Chấm điểm kỹ năng giao tiếp  
+		- [x] Chấm điểm kỹ năng bán hàng  
+		6. **Những chức năng đang phát triển**
+		- [ ] Đánh giá nhập liệu CRM  
+		- [ ] Đánh giá mức lỗi  
+		- [ ] Chấm điểm với thông tin trong tài liệu sản phẩm
+                7. **Lưu ý**: trong quá trình test các chị note lại giúp em ID cuộc gọi được ghi
+		ở đầu báo cáo để sau này bọn em dễ đối chiếu và cải thiện kết quả. Em cảm ơn các chị nhiều !
+"""
+)
         with gr.Column(scale=3):
-            gr.Markdown("## 📊 Kết quả Xử lý")
+            gr.Markdown("## 📊 Kết quả đánh giá")
             report_output = gr.Textbox(
                 label="📄 Báo cáo Chi tiết",
                 lines=25,
@@ -157,9 +176,12 @@ if __name__ == "__main__":
     parser.add_argument("--server_name", type=str, default="0.0.0.0")
     parser.add_argument("--server_port", type=int, default=7860)
     args = parser.parse_args()
-    demo.launch(
-        share=True,
-        debug=False,
-        server_name=args.server_name,
-        server_port=args.server_port
-    )
+    #demo.launch(
+    #    share=False,
+    #    debug=True,
+    #    server_name=args.server_name,
+    #    server_port=args.server_port,
+    #    root_path="/gradio"
+    #)
+    app = gr.mount_gradio_app(app, demo, path="/")
+    uvicorn.run(app, host="0.0.0.0", port=args.server_port)

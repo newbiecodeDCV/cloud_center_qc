@@ -39,6 +39,8 @@ class QASalesEvaluator:
             criteria_name = self.criteria_name.get(criteria_id, "Unknown")
             status = 'đạt' if item.get('status', 0) == 1 else 'chưa đạt'
             note = item.get('Note', '')
+            print(repr(note))
+            note = "\n".join("\t" + line for line in note.splitlines())
             score = item.get('score', 0)
             final_score += score
             detail_result += f"+ Tiêu chí: {criteria_name}, đánh giá: {status}, điểm: {score}, nhận xét:\n{note} \n"

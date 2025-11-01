@@ -65,14 +65,15 @@ class QAMainEvaluator:
                 "metadata": analysis_result.get('metadata'),
                 "segments": analysis_result.get('segments')
             }
-
+            
+            ly_do = "\n".join("\t" + line for line in ly_do.splitlines())
             detail_result = "I. Đánh giá kỹ năng giao tiếp theo các tiêu chí:\n"
             detail_result += f"+ Chào xưng danh: {chao_xung_danh}\n"
             detail_result += f"+ Kỹ năng nói: {ky_nang_noi}\n"
             detail_result += f"+ Kỹ năng nghe: {ky_nang_nghe}\n"
             detail_result += f"+ Thái độ: {thai_do}\n"
             detail_result += f"+ Tổng điểm: {tong_diem}\n"
-            detail_result += f"+ Lý do: {ly_do}\n"
+            detail_result += f"+ Lý do: \n{ly_do}\n"
 
             return {'detail_result': detail_result,
                     'score': tong_diem,
