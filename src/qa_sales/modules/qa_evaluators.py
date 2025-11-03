@@ -5,6 +5,10 @@ from src.qa_sales.modules.evaluators import ScriptEvaluator
 from typing import List, Dict
 from logging import getLogger
 import pandas as pd
+from src.qa_communicate.core.langfuse_config import (
+    LANGFUSE_ENABLED,
+    log_span
+)
 
 logger = getLogger(__name__)
 
@@ -39,7 +43,6 @@ class QASalesEvaluator:
             criteria_name = self.criteria_name.get(criteria_id, "Unknown")
             status = 'đạt' if item.get('status', 0) == 1 else 'chưa đạt'
             note = item.get('Note', '')
-            print(repr(note))
             note = "\n".join("\t" + line for line in note.splitlines())
             score = item.get('score', 0)
             final_score += score
@@ -49,30 +52,100 @@ class QASalesEvaluator:
 
     async def run_evaluate(self,
                            audio_bytes: bytes,
-                           task_id: int):
-        # Get dialogure result from audio
+                           task_id: int,
+                           trace=None):
+        """
+        Run sales evaluation
+        
+        Args:
+            audio_bytes: Audio data
+            task_id: Task ID
+            trace: Langfuse trace (optional)
+        """
+        # Span 1: Get dialogue from audio
+        if LANGFUSE_ENABLED and trace:
+            log_span(
+                trace=trace,
+                name="extract_dialogue",
+                input_data={"audio_size": len(audio_bytes)},
+                metadata={"step": "1/3"}
+            )
+        
         dialogue_result = await call_dialogue_api(audio_bytes=audio_bytes,
                                                   task_id=task_id)
 
         if dialogue_result['status'] != 1:
+            if trace:
+                trace.update(
+                    output={
+                        "status": "error",
+                        "error": "Failed to get dialogue from audio"
+                    }
+                )
             return {'status': -1,
                     'message': 'Failed to get dialogue from audio'}
-        # Process dialogue to extract speaker roles and classify utterances
-        processed_result = await self.dialogue_processor(dialogue=dialogue_result['dialogue'],
-                                                         prompt_template=self.pre_prompt_template)
+        
+        # Span 2: Process dialogue
+        if LANGFUSE_ENABLED and trace:
+            log_span(
+                trace=trace,
+                name="process_dialogue",
+                input_data={"dialogue_length": len(dialogue_result['dialogue'])},
+                metadata={"step": "2/3"}
+            )
+        
+        processed_result = await self.dialogue_processor(
+            dialogue=dialogue_result['dialogue'],
+            prompt_template=self.pre_prompt_template
+        )
 
         if processed_result['status'] != 1:
+            if trace:
+                trace.update(
+                    output={
+                        "status": "error",
+                        "error": "Failed to process dialogue"
+                    }
+                )
             return {'status': -1,
                     'message': 'Failed to process dialogue'}
 
-        # Evaluate
-        results = await self.script_evaluator(dialogue=processed_result['dialogue'])
+        # Span 3: Evaluate
+        if LANGFUSE_ENABLED and trace:
+            log_span(
+                trace=trace,
+                name="evaluate_sales_script",
+                input_data={"processed_dialogue_length": len(processed_result['dialogue'])},
+                metadata={"step": "3/3"}
+            )
+        
+        results = await self.script_evaluator(
+            dialogue=processed_result['dialogue'],
+            trace=trace  # Pass trace to evaluator
+        )
 
         if results['status'] != 1:
+            if trace:
+                trace.update(
+                    output={
+                        "status": "error",
+                        "error": "Failed to evaluate dialogue"
+                    }
+                )
             return {'status': -1,
                     'message': 'Failed to evaluate dialogue'}
+        
         detail_result, final_score = self.process_result(results=results['criteria_evals'])
+        
+        if trace:
+            trace.update(
+                output={
+                    "status": "success",
+                    "final_score": final_score,
+                    "criteria_count": len(results['criteria_evals'])
+                }
+            )
+        
         return {'status': 1,
                 'detail_result': detail_result,
                 'final_score': final_score}
-
