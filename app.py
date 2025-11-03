@@ -176,12 +176,6 @@ if __name__ == "__main__":
     parser.add_argument("--server_name", type=str, default="0.0.0.0")
     parser.add_argument("--server_port", type=int, default=7860)
     args = parser.parse_args()
-    #demo.launch(
-    #    share=False,
-    #    debug=True,
-    #    server_name=args.server_name,
-    #    server_port=args.server_port,
-    #    root_path="/gradio"
-    #)
+    
     app = gr.mount_gradio_app(app, demo, path="/")
     uvicorn.run(app, host="0.0.0.0", port=args.server_port)

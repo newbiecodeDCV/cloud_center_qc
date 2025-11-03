@@ -1,7 +1,8 @@
 """
-Langfuse configuration and utilities for LLM observability
+Fixed Langfuse configuration với proper async handling
 """
 import os
+import asyncio
 from typing import Optional, Dict, Any
 from functools import wraps
 from dotenv import load_dotenv
@@ -12,9 +13,7 @@ from logging import getLogger
 load_dotenv()
 logger = getLogger(__name__)
 
-
 LANGFUSE_ENABLED = os.getenv("LANGFUSE_ENABLED", "false").lower() == "true"
-
 
 langfuse_client: Optional[Langfuse] = None
 
@@ -23,9 +22,12 @@ if LANGFUSE_ENABLED:
         langfuse_client = Langfuse(
             public_key=os.getenv("LANGFUSE_PUBLIC_KEY"),
             secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
-            host=os.getenv("LANGFUSE_HOST")
+            host=os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com"),
+            flush_at=1,  # 🔥 CRITICAL: Flush ngay lập tức
+            flush_interval=0.5  # Flush mỗi 0.5s
         )
         logger.info("✅ Langfuse initialized successfully")
+        logger.info(f"   Host: {os.getenv('LANGFUSE_HOST', 'https://cloud.langfuse.com')}")
     except Exception as e:
         logger.error(f"❌ Failed to initialize Langfuse: {e}")
         LANGFUSE_ENABLED = False
@@ -33,25 +35,25 @@ else:
     logger.info("⚠️ Langfuse tracking is disabled")
 
 
-def create_trace(name: str, metadata: Optional[Dict[str, Any]] = None):
+def create_trace(name: str, metadata: Optional[Dict[str, Any]] = None, trace_id: Optional[str] = None):
     """
     Tạo một trace mới trong Langfuse
     
-    Args:
-        name: Tên của trace 
-        metadata: Metadata bổ sung 
-    
-    Returns:
-        Trace object hoặc None nếu Langfuse không được bật
+    🔥 FIX: Thêm trace_id parameter để có thể link traces
     """
     if not LANGFUSE_ENABLED or not langfuse_client:
         return None
     
     try:
         trace = langfuse_client.trace(
+            id=trace_id,  
             name=name,
             metadata=metadata or {}
         )
+        
+        #
+        langfuse_client.flush()
+        
         return trace
     except Exception as e:
         logger.error(f"Failed to create trace: {e}")
@@ -70,20 +72,13 @@ def log_generation(
     """
     Log một LLM generation vào trace
     
-    Args:
-        trace: Trace object từ create_trace()
-        name: Tên generation (ví dụ: "evaluate_script", "classify_utterances")
-        model: Tên model (ví dụ: "gpt-4.1-mini")
-        input_data: Input prompt hoặc messages
-        output_data: Output từ LLM
-        metadata: Metadata bổ sung
-        usage: Token usage (prompt_tokens, completion_tokens, total_tokens)
+     FIX: Flush ngay sau khi log
     """
     if not LANGFUSE_ENABLED or not trace:
         return
     
     try:
-        trace.generation(
+        generation = trace.generation(
             name=name,
             model=model,
             input=input_data,
@@ -91,8 +86,15 @@ def log_generation(
             metadata=metadata or {},
             usage=usage
         )
+        
+        
+        if langfuse_client:
+            langfuse_client.flush()
+        
+        return generation
     except Exception as e:
         logger.error(f"Failed to log generation: {e}")
+        return None
 
 
 def log_span(
@@ -105,15 +107,10 @@ def log_span(
     """
     Log một span (bước xử lý) vào trace
     
-    Args:
-        trace: Trace object
-        name: Tên span 
-        input_data: Input của span
-        output_data: Output của span
-        metadata: Metadata bổ sung
+    🔥 FIX: Flush ngay sau khi log
     """
     if not LANGFUSE_ENABLED or not trace:
-        return
+        return None
     
     try:
         span = trace.span(
@@ -122,6 +119,11 @@ def log_span(
             output=output_data,
             metadata=metadata or {}
         )
+        
+        
+        if langfuse_client:
+            langfuse_client.flush()
+        
         return span
     except Exception as e:
         logger.error(f"Failed to log span: {e}")
@@ -130,64 +132,65 @@ def log_span(
 
 def flush_langfuse():
     """
-    Flush tất cả events sang Langfuse server
-    (Gọi khi shutdown application)
+    🔥 FIX: Async flush với retry logic
     """
     if LANGFUSE_ENABLED and langfuse_client:
         try:
-            langfuse_client.flush()
+            logger.info("⏳ Flushing Langfuse events...")
+            
+            
+            for i in range(3):
+                langfuse_client.flush()
+                import time
+                time.sleep(0.5)  
+            
             logger.info("✅ Langfuse events flushed")
+            
         except Exception as e:
             logger.error(f"Failed to flush Langfuse: {e}")
 
 
-def tracked_async_function(func_name: str):
+def shutdown_langfuse():
     """
-    Decorator để tự động track async function
+    🔥 NEW: Proper shutdown với timeout
+    """
+    if LANGFUSE_ENABLED and langfuse_client:
+        try:
+            logger.info("🛑 Shutting down Langfuse...")
+            
+            
+            flush_langfuse()
+            
+            
+            import time
+            time.sleep(2)
+            
+            logger.info("✅ Langfuse shutdown complete")
+            
+        except Exception as e:
+            logger.error(f"Error during Langfuse shutdown: {e}")
+
+
+
+class LangfuseContext:
+    """
+    Context manager để ensure proper cleanup
     
     Usage:
-        @tracked_async_function("evaluate_communication")
-        async def evaluate_communication(...):
-            ...
+        with LangfuseContext() as ctx:
+            trace = ctx.create_trace("my_trace")
+            # ... do work
     """
-    def decorator(func):
-        @wraps(func)
-        async def wrapper(*args, **kwargs):
-            if not LANGFUSE_ENABLED:
-                return await func(*args, **kwargs)
-            
-            
-            trace = create_trace(
-                name=func_name,
-                metadata={
-                    "function": func.__name__,
-                    "args_count": len(args),
-                    "kwargs_keys": list(kwargs.keys())
-                }
-            )
-            
-            try:
-            
-                result = await func(*args, **kwargs)
-                
-                
-                if trace:
-                    trace.update(
-                        output={"status": result.get("status") if isinstance(result, dict) else "unknown"}
-                    )
-                
-                return result
-            except Exception as e:
-            
-                if trace:
-                    trace.update(
-                        output={"error": str(e)}
-                    )
-                raise
-        
-        return wrapper
-    return decorator
-
+    
+    def __enter__(self):
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        flush_langfuse()
+        return False
+    
+    def create_trace(self, name: str, metadata: Optional[Dict[str, Any]] = None):
+        return create_trace(name, metadata)
 
 
 __all__ = [
@@ -197,5 +200,7 @@ __all__ = [
     "log_generation",
     "log_span",
     "flush_langfuse",
-    "tracked_async_function",
-    "observe"  ]
+    "shutdown_langfuse",
+    "LangfuseContext",
+    "observe"
+]

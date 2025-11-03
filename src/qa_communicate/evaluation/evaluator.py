@@ -1,178 +1,123 @@
-import openai
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import PromptTemplate
+from langchain_community.vectorstores import Chroma
+from typing import List, Dict, Any
 from dotenv import load_dotenv
-import os
+from ast import literal_eval
+import pandas as pd
 import json
-from src.qa_communicate.prompt.prompts import build_qa_prompt
-from src.qa_communicate.core.langfuse_config import (
-    LANGFUSE_ENABLED,
-    create_trace,
-    log_generation,
-    log_span
-)
+import os
+import logging
 
-
-
+# ======= Logger setup =======
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+# ============================
 
 load_dotenv()
 
-# Lấy thông tin cấu hình từ biến môi trường
-API_KEY = os.getenv("OPENAI_API_KEY")
-API_BASE_URL = os.getenv("BASE_URL")
-MODEL_NAME = os.getenv("MODEL_NAME")
 
-# Khởi tạo client OpenAI với cấu hình tùy chỉnh
-if API_KEY and API_BASE_URL:
-    client = openai.AsyncOpenAI(
-        api_key=API_KEY,
-        base_url=API_BASE_URL,
-    )
-else:
-    client = None
-    print("⚠️ CẢNH BÁO: Thiếu OPENAI_API_KEY hoặc OPENAI_API_BASE trong file .env")
-
-
-async def get_qa_evaluation(call_data: dict,task_id: int = None) -> dict:
-    """
-    Gửi prompt đến LLM và nhận kết quả đánh giá QA.
-    """
-    print(f"DEBUG - API_KEY exists: {bool(API_KEY)}")
-    print(f"DEBUG - API_BASE_URL: {API_BASE_URL}")
-    print(f"DEBUG - MODEL_NAME: {MODEL_NAME}")
-    
-
-    trace = None
-    if LANGFUSE_ENABLED:
-        trace = create_trace(
-            name="evaluate_communication_skills",
-            metadata={
-                "task_id": task_id,
-                "model": MODEL_NAME,
-                "duration": call_data.get("metadata", {}).get("duration"),
-                "turns": call_data.get("metadata", {}).get("turns")
-            }
-        )
-    
-    if trace:
-        log_span(
-            trace=trace,
-            name="build_prompt",
-            input_data={"metadata": call_data.get("metadata")},
-            metadata={"segments_count": len(call_data.get("segments", []))}
-        )
-    
-    prompt = build_qa_prompt(call_data)
-
-    try:
-        if client is None:
-            error_result = {"error": "Thiếu cấu hình OPENAI_API_KEY/BASE_URL"}
-            if trace:
-                trace.update(output=error_result)
-            return error_result
-            
-        if not MODEL_NAME:
-            error_result = {"error": "Thiếu MODEL_NAME"}
-            if trace:
-                trace.update(output=error_result)
-            return error_result
-
-        response = await client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "Bạn là chuyên gia phân tích chất lượng cuộc gọi. Đánh giá chính xác dựa trên dữ liệu âm học và transcript. Trả về JSON theo format đã cho."
-                },
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
-            temperature=0,
-            response_format={"type": "json_object"}
+class ScriptEvaluator:
+    def __init__(self,
+                 model: str = "gpt-4.1-mini",
+                 eval_prompt_template: str = "prompt_templates/evaluate_script.txt",
+                 classify_prompt_template: str = "prompt_templates/classify_utterances.txt",
+                 chroma_db: Chroma = None,
+                 tsv_path: str = "data/sale_criteria.tsv"):
+        self.llm = ChatOpenAI(
+            model=model,
+            temperature=0.0,
+            api_key=os.getenv("OPENAI_API_KEY"),
+            base_url=os.getenv("BASE_URL")
         )
 
-        messages = [
-            {
-                "role": "system",
-                "content": "Bạn là chuyên gia phân tích chất lượng cuộc gọi. Đánh giá chính xác dựa trên dữ liệu âm học và transcript. Trả về JSON theo format đã cho."
-            },
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ]
-        
-        response = await client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=messages,
-            temperature=0,
-            response_format={"type": "json_object"}
-        )
+        eval_prompt = open(eval_prompt_template).read()
+        classify_prompt = open(classify_prompt_template).read()
+        self.classify_prompt = PromptTemplate.from_template(classify_prompt)
+        self.eval_prompt = PromptTemplate.from_template(eval_prompt)
 
-        result_content = response.choices[0].message.content.strip()
+        df = pd.read_csv(tsv_path, delimiter="\t")
+        self.criteria_score = dict(zip(df['criteria_id'], df['criteria_score']))
 
-        
-        if result_content.startswith("```json"):
-            result_content = result_content[7:]
-        if result_content.endswith("```"):
-            result_content = result_content[:-3]
-        
-        result_content = result_content.strip()
-        result_json = json.loads(result_content)
-        
-        
-        if trace:
-            log_generation(
-                trace=trace,
-                name="llm_evaluation",
-                model=MODEL_NAME,
-                input_data=messages,
-                output_data=result_json,
-                metadata={
-                    "temperature": 0,
-                    "response_format": "json_object"
-                },
-                usage={
-                    "prompt_tokens": response.usage.prompt_tokens,
-                    "completion_tokens": response.usage.completion_tokens,
-                    "total_tokens": response.usage.total_tokens
-                }
+        self.step_detail = self.from_db_to_text(chroma_db=chroma_db)
+
+    # ======================================================
+    # 1️⃣ Classify utterances into criteria
+    # ======================================================
+    def classify_utterances_to_criteria(self,
+                                        utterances: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        chain = self.classify_prompt | self.llm
+        response = chain.invoke({'sale_texts': utterances,
+                                 'step_detail': self.step_detail})
+
+        logger.info("=== [LLM classify response content] ===\n%s\n===============================", response.content)
+
+        sale_texts = None
+        parse_error = None
+        for parse_fn in (json.loads, literal_eval):
+            try:
+                sale_texts = parse_fn(response.content)
+                break
+            except Exception as e:
+                parse_error = e
+                logger.debug("Parser %s failed: %s", parse_fn.__name__, e)
+
+        if sale_texts is None:
+            logger.error("❌ Không parse được classify response.\nNội dung:\n%s\nLỗi: %s",
+                         response.content, parse_error, exc_info=True)
+            raise RuntimeError(f"Failed to parse classify response: {parse_error}")
+
+        return sale_texts
+
+    # ======================================================
+    # 2️⃣ Convert database to textual representation
+    # ======================================================
+    def from_db_to_text(self, chroma_db: Chroma) -> str:
+        """
+        Convert the Chroma database to a text representation.
+        """
+        result = ""
+        all_metadatas = chroma_db.get(include=["metadatas"])
+        for metadata in all_metadatas['metadatas']:
+            criteria_id = metadata['criteria_id']
+            criteria_name = metadata['criteria_name']
+            criteria_actions = metadata['criteria_actions']
+            criteria_description = metadata['criteria_description']
+            result += (
+                f"criteria ID: {criteria_id}\n"
+                f"criteria Name: {criteria_name}\n"
+                f"criteria Description: {criteria_description}\n"
+                f"criteria Actions: {criteria_actions}\n\n"
             )
-            
-            
-            trace.update(
-                output={
-                    "status": "success",
-                    "scores": {
-                        "chao_xung_danh": result_json.get("chao_xung_danh"),
-                        "ky_nang_noi": result_json.get("ky_nang_noi"),
-                        "ky_nang_nghe": result_json.get("ky_nang_nghe"),
-                        "thai_do": result_json.get("thai_do")
-                    },
-                    "muc_loi": result_json.get("muc_loi")
-                }
-            )
+        return result
 
-        return result_json
+    # ======================================================
+    # 3️⃣ Scoring function
+    # ======================================================
+    def score_and_response(self,
+                           criteria_evals: List[Dict[str, Any]],
+                           criteria_score: Dict[int, float]) -> Dict:
+        """
+        Score the criteria evaluations based on the criteria scores.
+        """
+        for criteria_eval in criteria_evals:
+            criteria_id = criteria_eval['criteria_id']
+            criteria_eval['score'] = criteria_score.get(criteria_id, 0) * int(criteria_eval['status'])
+        return criteria_evals
 
-    except json.JSONDecodeError as json_err:
-        print(f"Lỗi parse JSON: {json_err}")
-        print(f"Nội dung từ model: {result_content}")
-        error_result = {
-            "error": "Lỗi phân tích JSON từ model",
-            "raw_response": result_content
-        }
-        
-        if trace:
-            trace.update(output={"status": "error", "error": str(json_err)})
-        
-        return error_result
-        
-    except Exception as e:
-        print(f"Lỗi khi gọi LLM API: {e}")
-        error_result = {"error": str(e)}
-        
-        if trace:
-            trace.update(output={"status": "error", "error": str(e)})
-        
-        return error_result
+    # ======================================================
+    # 4️⃣ Main evaluation pipeline
+    # ======================================================
+    def __call__(self, dialogue: List[Dict[str, Any]]) -> str:
+        chain = self.eval_prompt | self.llm
+        sale_texts = self.classify_utterances_to_criteria(utterances=dialogue)
+        response = chain.invoke({
+            "sale_texts": sale_texts,
+            "step_detail": self.step_detail
+        })
+
+        criteria_evals = literal_eval(response.content)
+        criteria_evals = self.score_and_response(criteria_evals, self.criteria_score)
+        return {'status': 1,
+                'criteria_evals': criteria_evals,
+                'message': 'Success'}

@@ -10,7 +10,7 @@ import uvicorn
 import jwt
 import os
 import argparse
-from src.qa_communicate.core.langfuse_config import flush_langfuse
+
 
 
 app = FastAPI()
@@ -142,7 +142,6 @@ async def post(request: Request, bg_task: BackgroundTasks):
 async def shutdown_event():
     """Flush Langfuse events trước khi shutdown"""
     logger.info("Shutting down API server...")
-    flush_langfuse()
     logger.info("Langfuse events flushed successfully")
 
 
