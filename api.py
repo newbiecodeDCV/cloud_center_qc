@@ -5,6 +5,9 @@ from loguru import logger
 from src.qa_communicate.core.utils import is_url, is_audio_file, create_task_id, write_json
 from urllib.request import urlopen
 from src.main_evaluator import QAMainEvaluator
+from watchdog.observers import Observer
+from src.utils.file_handlers import CSVWatcher
+import os, threading, time
 from time import perf_counter
 import uvicorn
 import jwt
@@ -14,6 +17,14 @@ import argparse
 
 app = FastAPI()
 PRIVATE_TOKEN = "41ad97aa3c747596a4378cc8ba101fe70beb3f5f70a75407a30e6ddab668310d"
+
+
+def start_file_watcher():
+    observer = Observer()
+    observer.schedule(csv_watcher, path=os.path.dirname(args.csv_path) or ".", recursive=False)
+    observer.start()
+    print("CSV watcher started.")
+    return observer
 
 
 async def get_qa(audio_bytes: bytes,
@@ -39,6 +50,12 @@ async def get_qa(audio_bytes: bytes,
     else:
         logger.error(f"Task {task_id} failed with message: {result['message']}")
     write_json(rs, done_json_file_path)
+
+
+
+@app.on_event("startup")
+def on_startup():
+    threading.Thread(target=start_file_watcher, daemon=True).start()
 
 
 @app.get("/")
@@ -153,5 +170,7 @@ if __name__ == "__main__":
                                      preprocess_prompt_template=args.preprocess_prompt_template,
                                      classify_prompt_template=args.classify_prompt_template,
                                      db_path=args.db_path)
-
+    csv_watcher = CSVWatcher(csv_path=args.csv_path,
+                             db_path=args.db_path,
+                             reload_callback=main_evaluator.qa_evaluator.rebuild_database)
     uvicorn.run(app, host=args.host, port=args.port)
