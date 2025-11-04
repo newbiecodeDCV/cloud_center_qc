@@ -15,6 +15,7 @@ import os
 import argparse
 
 
+
 app = FastAPI()
 PRIVATE_TOKEN = "41ad97aa3c747596a4378cc8ba101fe70beb3f5f70a75407a30e6ddab668310d"
 
@@ -153,6 +154,14 @@ async def post(request: Request, bg_task: BackgroundTasks):
         })
 
 
+# ==================== SHUTDOWN HANDLER ====================
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Flush Langfuse events trước khi shutdown"""
+    logger.info("Shutting down API server...")
+    logger.info("Langfuse events flushed successfully")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="QA Evaluator API Server")
     parser.add_argument("--host", type=str, default="0.0.0.0")
@@ -170,7 +179,9 @@ if __name__ == "__main__":
                                      preprocess_prompt_template=args.preprocess_prompt_template,
                                      classify_prompt_template=args.classify_prompt_template,
                                      db_path=args.db_path)
+
     csv_watcher = CSVWatcher(csv_path=args.csv_path,
                              db_path=args.db_path,
                              reload_callback=main_evaluator.qa_evaluator.rebuild_database)
     uvicorn.run(app, host=args.host, port=args.port)
+

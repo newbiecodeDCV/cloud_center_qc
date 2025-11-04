@@ -1,10 +1,13 @@
 import openai
 from dotenv import load_dotenv
+from src.qa_communicate.prompt.prompts import build_qa_prompt
+from src.qa_communicate.core.langfuse_config import log_generation, LANGFUSE_ENABLED
+from typing import Dict, Any
 import os
 import json
-from src.qa_communicate.prompt.prompts import build_qa_prompt
+import logging
 
-# Tải các biến từ file .env vào môi trường
+logger = logging.getLogger(__name__)
 load_dotenv()
 
 # Lấy thông tin cấu hình từ biến môi trường
@@ -20,59 +23,155 @@ if API_KEY and API_BASE_URL:
     )
 else:
     client = None
-    print("⚠️ CẢNH BÁO: Thiếu OPENAI_API_KEY hoặc OPENAI_API_BASE trong file .env")
+    logger.warning("⚠️ Thiếu OPENAI_API_KEY hoặc BASE_URL trong file .env")
 
 
-async def get_qa_evaluation(call_data: dict) -> dict:
+async def get_qa_evaluation(call_data: Dict[str, Any], 
+                            trace=None,
+                            parent_span=None) -> Dict:
     """
-    Gửi prompt đến LLM và nhận kết quả đánh giá QA.
+    Evaluate communication skills using LLM with Langfuse tracing.
+    
+    Steps:
+    1. Build prompt from call data
+    2. Call LLM (OpenAI AsyncClient)
+    3. Parse response
     """
-    print(f"DEBUG - API_KEY exists: {bool(API_KEY)}")
-    print(f"DEBUG - API_BASE_URL: {API_BASE_URL}")
-    print(f"DEBUG - MODEL_NAME: {MODEL_NAME}")
-    prompt = build_qa_prompt(call_data)
-
     try:
+        # Validate configuration
         if client is None:
-            return {"error": "Thiếu cấu hình OPENAI_API_KEY/OPENAI_API_BASE"}
+            error_msg = "Thiếu cấu hình OPENAI_API_KEY/BASE_URL"
+            logger.error(error_msg)
+            return {"error": error_msg}
+        
         if not MODEL_NAME:
-            return {"error": "Thiếu MODEL_NAME"}
-
+            error_msg = "Thiếu MODEL_NAME trong .env"
+            logger.error(error_msg)
+            return {"error": error_msg}
+        
+        # Sub-step 1: Build prompt
+        if parent_span:
+            prompt_span = parent_span.span(
+                name="build_prompt",
+                input={"call_data_keys": list(call_data.keys())}
+            )
+        
+        logger.info("Building evaluation prompt...")
+        prompt = build_qa_prompt(call_data)
+        
+        if parent_span:
+            prompt_span.end(
+                output={"prompt": prompt}
+            )
+        
+        # Sub-step 2: Call LLM
+        logger.info(f"Calling OpenAI API ({MODEL_NAME}) for communication evaluation...")
+        
+        messages = [
+            {
+                "role": "system",
+                "content": "Bạn là chuyên gia phân tích chất lượng cuộc gọi. Đánh giá chính xác dựa trên dữ liệu âm học và transcript. Trả về JSON theo format đã cho."
+            },
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ]
+        
         response = await client.chat.completions.create(
             model=MODEL_NAME,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "Bạn là chuyên gia phân tích chất lượng cuộc gọi. Đánh giá chính xác dựa trên dữ liệu âm học và transcript. Trả về JSON theo format đã cho."
-                },
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
+            messages=messages,
             temperature=0,
             response_format={"type": "json_object"}
         )
-
+        
         result_content = response.choices[0].message.content.strip()
-
-        # Xử lý markdown block
+        
+        # Log LLM generation to Langfuse
+        if trace and LANGFUSE_ENABLED:
+            usage_data = response.usage
+            log_generation(
+                trace=trace,
+                name="llm_communication_evaluation",
+                model=MODEL_NAME,
+                input_data={
+                    "messages": messages,
+                    "metadata_summary": call_data.get('metadata', {}),
+                    
+                },
+                output_data=result_content,
+                metadata={
+                    "evaluation_type": "communication_skills",
+                    "temperature": 0,
+                    "response_format": "json_object"
+                },
+                usage={
+                    "prompt_tokens": usage_data.prompt_tokens if usage_data else 0,
+                    "completion_tokens": usage_data.completion_tokens if usage_data else 0,
+                    "total_tokens": usage_data.total_tokens if usage_data else 0
+                }
+            )
+        
+        # Sub-step 3: Parse response
+        if parent_span:
+            parse_span = parent_span.span(
+                name="parse_llm_response",
+                input={"response": result_content}
+            )
+        
+        logger.info("Parsing LLM response...")
+        
+        # Xử lý markdown block (fallback nếu model vẫn trả về)
         if result_content.startswith("```json"):
             result_content = result_content[7:]
         if result_content.endswith("```"):
             result_content = result_content[:-3]
         
         result_content = result_content.strip()
-
-        return json.loads(result_content)
-
-    except json.JSONDecodeError as json_err:
-        print(f"Lỗi parse JSON: {json_err}")
-        print(f"Nội dung từ model: {result_content}")
-        return {
-            "error": "Lỗi phân tích JSON từ model",
-            "raw_response": result_content
-        }
+        
+        try:
+            evaluation_result = json.loads(result_content)
+            
+            if parent_span:
+                parse_span.end(
+                    output={
+                        "status": "success",
+                        "result": evaluation_result
+                    }
+                )
+            
+            logger.info("✓ Successfully parsed communication evaluation")
+            return evaluation_result
+            
+        except json.JSONDecodeError as json_err:
+            logger.error(f"JSON decode error: {json_err}")
+            logger.error(f"Raw response: {result_content[:500]}")
+            
+            if parent_span:
+                parse_span.end(
+                    output={
+                        "status": "error",
+                        "error": str(json_err),
+                        "raw_response_preview": result_content[:200]
+                    }
+                )
+            
+            return {
+                "error": "Lỗi phân tích JSON từ model",
+                "raw_response": result_content
+            }
+    
     except Exception as e:
-        print(f"Lỗi khi gọi LLM API: {e}")
-        return {"error": str(e)}
+        logger.error(f"Error in get_qa_evaluation: {e}", exc_info=True)
+        
+        if parent_span:
+            error_span = parent_span.span(
+                name="error_handling",
+                input={"error": str(e), "error_type": type(e).__name__}
+            )
+            error_span.end(output={"status": "failed"})
+        
+        return {
+            "error": str(e),
+            "error_type": type(e).__name__
+        }
