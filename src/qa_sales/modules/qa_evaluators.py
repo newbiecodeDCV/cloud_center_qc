@@ -87,7 +87,7 @@ class QASalesEvaluator:
                 dialogue_span.end(
                     output={
                         "status": dialogue_result.get('status'),
-                        "num_segments": dialogue_result.get('dialogue', [])
+                        "segments": dialogue_result.get('dialogue', [])
                     }
                 )
 
