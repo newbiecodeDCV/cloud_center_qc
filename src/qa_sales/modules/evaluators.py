@@ -1,6 +1,11 @@
+"""
+Script Evaluator - Detailed Sales Script Evaluation with Langfuse Tracing
+File: src/qa_sales/modules/evaluators.py
+"""
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from langchain_community.vectorstores import Chroma
+from src.qa_communicate.core.langfuse_config import log_generation, LANGFUSE_ENABLED
 from typing import List, Dict, Any
 from dotenv import load_dotenv
 from ast import literal_eval
@@ -9,115 +14,408 @@ import json
 import os
 import logging
 
-# ======= Logger setup =======
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-# ============================
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 
 load_dotenv()
 
 
 class ScriptEvaluator:
+    """
+    Evaluate sales script against predefined criteria with Langfuse tracing.
+    
+    Pipeline:
+    1. Classify utterances into criteria
+    2. Evaluate each criterion
+    3. Calculate scores
+    """
+    
     def __init__(self,
                  model: str = "gpt-4.1-mini",
                  eval_prompt_template: str = "prompt_templates/evaluate_script.txt",
                  classify_prompt_template: str = "prompt_templates/classify_utterances.txt",
                  chroma_db: Chroma = None,
                  tsv_path: str = "data/sale_criteria.tsv"):
+        """
+        Initialize ScriptEvaluator.
+        
+        Args:
+            model: LLM model name
+            eval_prompt_template: Path to evaluation prompt template
+            classify_prompt_template: Path to classification prompt template
+            chroma_db: Chroma vector database with criteria
+            tsv_path: Path to TSV file with criteria scores
+        """
+        logger.info(f"Initializing ScriptEvaluator with model: {model}")
+        
         self.llm = ChatOpenAI(
             model=model,
             temperature=0.0,
             api_key=os.getenv("OPENAI_API_KEY"),
             base_url=os.getenv("BASE_URL")
         )
-
-        eval_prompt = open(eval_prompt_template).read()
-        classify_prompt = open(classify_prompt_template).read()
+        
+        # Load prompt templates
+        with open(eval_prompt_template, 'r', encoding='utf-8') as f:
+            eval_prompt = f.read()
+        with open(classify_prompt_template, 'r', encoding='utf-8') as f:
+            classify_prompt = f.read()
+        
         self.classify_prompt = PromptTemplate.from_template(classify_prompt)
         self.eval_prompt = PromptTemplate.from_template(eval_prompt)
-
+        
+        # Load criteria scores from TSV
         df = pd.read_csv(tsv_path, delimiter="\t")
         self.criteria_score = dict(zip(df['criteria_id'], df['criteria_score']))
-
+        
+        # Convert Chroma DB to text representation
         self.step_detail = self.from_db_to_text(chroma_db=chroma_db)
+        
+        self.model = model
+        
+        logger.info(f"✓ ScriptEvaluator initialized with {len(self.criteria_score)} criteria")
 
-    # ======================================================
-    # 1️⃣ Classify utterances into criteria
-    # ======================================================
     def classify_utterances_to_criteria(self,
-                                        utterances: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        chain = self.classify_prompt | self.llm
-        response = chain.invoke({'sale_texts': utterances,
-                                 'step_detail': self.step_detail})
-
-        logger.info("=== [LLM classify response content] ===\n%s\n===============================", response.content)
-
+                                        utterances: List[Dict[str, Any]],
+                                        trace=None,
+                                        parent_span=None) -> List[Dict[str, Any]]:
+        """
+        Classify sales utterances into criteria with Langfuse tracing.
+        
+        Args:
+            utterances: List of sales utterances to classify
+            trace: Langfuse trace object (optional)
+            parent_span: Parent span for nested tracking (optional)
+            
+        Returns:
+            List of dictionaries mapping criteria to utterances:
+            [
+                {
+                    "criteria_id": 1,
+                    "utterance": ["text1", "text2", ...]
+                },
+                ...
+            ]
+        """
+        logger.info(f"Classifying {len(utterances)} utterances into criteria...")
+        
+        if parent_span:
+            classify_span = parent_span.span(
+                name="classify_utterances",
+                input={
+                    "num_utterances": len(utterances),
+                    "num_criteria": len(self.criteria_score)
+                }
+            )
+        
+        # Build prompt từ template
+        prompt_text = self.classify_prompt.format(
+            sale_texts=utterances,
+            step_detail=self.step_detail
+        )
+        
+        logger.debug(f"Classify prompt (first 500 chars): {prompt_text[:500]}")
+        
+        # Invoke LLM
+        response = self.llm.invoke(prompt_text)
+        response_content = response.content
+        
+        # Log to Langfuse - LOG ĐÚNG PROMPT VÀ RESPONSE
+        if trace and LANGFUSE_ENABLED:
+            token_usage = response.response_metadata.get('token_usage', {})
+            log_generation(
+                trace=trace,
+                name="llm_classify_utterances",
+                model=self.model,
+                input_data=prompt_text,  # ✅ Input = Prompt thực tế
+                output_data=response_content,  # ✅ Output = Response từ LLM
+                metadata={
+                    "step": "classify_utterances_to_criteria",
+                    "num_utterances": len(utterances),
+                    "num_criteria": len(self.criteria_score),
+                    "temperature": 0.0
+                },
+                usage={
+                    "prompt_tokens": token_usage.get('prompt_tokens', 0),
+                    "completion_tokens": token_usage.get('completion_tokens', 0),
+                    "total_tokens": token_usage.get('total_tokens', 0)
+                }
+            )
+        
+        logger.info(f"LLM classify response (first 500 chars):\n{response_content[:500]}")
+        
+        # Parse response - try multiple parsers
         sale_texts = None
         parse_error = None
+        
         for parse_fn in (json.loads, literal_eval):
             try:
-                sale_texts = parse_fn(response.content)
+                sale_texts = parse_fn(response_content)
+                logger.info(f"✓ Successfully parsed with {parse_fn.__name__}")
                 break
             except Exception as e:
                 parse_error = e
-                logger.debug("Parser %s failed: %s", parse_fn.__name__, e)
-
+                logger.debug(f"Parser {parse_fn.__name__} failed: {e}")
+        
         if sale_texts is None:
-            logger.error("❌ Không parse được classify response.\nNội dung:\n%s\nLỗi: %s",
-                         response.content, parse_error, exc_info=True)
-            raise RuntimeError(f"Failed to parse classify response: {parse_error}")
-
+            error_msg = f"Failed to parse classify response: {parse_error}"
+            logger.error(error_msg)
+            logger.error(f"Raw response:\n{response_content}")
+            
+            if parent_span:
+                classify_span.end(
+                    output={
+                        "status": "error",
+                        "error": str(parse_error),
+                        "raw_response_preview": response_content[:200]
+                    }
+                )
+            
+            raise RuntimeError(error_msg)
+        
+        if parent_span:
+            classify_span.end(
+                output={
+                    "status": "success",
+                    "num_classified_groups": len(sale_texts),
+                    "criteria_ids": [item.get('criteria_id') for item in sale_texts]
+                }
+            )
+        
+        logger.info(f"✓ Classified into {len(sale_texts)} criteria groups")
+        
         return sale_texts
 
-    # ======================================================
-    # 2️⃣ Convert database to textual representation
-    # ======================================================
     def from_db_to_text(self, chroma_db: Chroma) -> str:
         """
-        Convert the Chroma database to a text representation.
+        Convert Chroma database to text representation.
+        
+        Args:
+            chroma_db: Chroma vector database
+            
+        Returns:
+            String containing all criteria information
         """
+        logger.info("Converting Chroma DB to text representation...")
+        
         result = ""
         all_metadatas = chroma_db.get(include=["metadatas"])
-        for metadata in all_metadatas['metadatas']:
-            criteria_id = metadata['criteria_id']
-            criteria_name = metadata['criteria_name']
-            criteria_actions = metadata['criteria_actions']
-            criteria_description = metadata['criteria_description']
+        
+        for idx, metadata in enumerate(all_metadatas['metadatas'], 1):
+            criteria_id = metadata.get('criteria_id', 'N/A')
+            criteria_name = metadata.get('criteria_name', 'N/A')
+            criteria_actions = metadata.get('criteria_actions', 'N/A')
+            criteria_description = metadata.get('criteria_description', 'N/A')
+            
             result += (
                 f"criteria ID: {criteria_id}\n"
                 f"criteria Name: {criteria_name}\n"
                 f"criteria Description: {criteria_description}\n"
                 f"criteria Actions: {criteria_actions}\n\n"
             )
+        
+        logger.info(f"✓ Converted {len(all_metadatas['metadatas'])} criteria to text")
+        
         return result
 
-    # ======================================================
-    # 3️⃣ Scoring function
-    # ======================================================
     def score_and_response(self,
                            criteria_evals: List[Dict[str, Any]],
-                           criteria_score: Dict[int, float]) -> Dict:
+                           criteria_score: Dict[int, float]) -> List[Dict[str, Any]]:
         """
-        Score the criteria evaluations based on the criteria scores.
+        Calculate scores for each criterion evaluation.
+        
+        Args:
+            criteria_evals: List of criterion evaluations with status
+            criteria_score: Dictionary mapping criteria_id to max score
+            
+        Returns:
+            Updated criteria_evals with scores added
         """
+        logger.info("Calculating scores for criteria evaluations...")
+        
         for criteria_eval in criteria_evals:
             criteria_id = criteria_eval['criteria_id']
-            criteria_eval['score'] = criteria_score.get(criteria_id, 0) * int(criteria_eval['status'])
+            status = int(criteria_eval.get('status', 0))
+            max_score = criteria_score.get(criteria_id, 0)
+            
+            # Score = max_score * status (1 or 0)
+            criteria_eval['score'] = max_score * status
+            
+            logger.debug(
+                f"Criteria {criteria_id}: status={status}, "
+                f"max_score={max_score}, final_score={criteria_eval['score']}"
+            )
+        
+        total_score = sum(c['score'] for c in criteria_evals)
+        logger.info(f"✓ Total score calculated: {total_score:.2f}")
+        
         return criteria_evals
 
-    # ======================================================
-    # 4️⃣ Main evaluation pipeline
-    # ======================================================
-    def __call__(self, dialogue: List[Dict[str, Any]]) -> str:
-        chain = self.eval_prompt | self.llm
-        sale_texts = self.classify_utterances_to_criteria(utterances=dialogue)
-        response = chain.invoke({
-            "sale_texts": sale_texts,
-            "step_detail": self.step_detail
-        })
-
-        criteria_evals = literal_eval(response.content)
-        criteria_evals = self.score_and_response(criteria_evals, self.criteria_score)
-        return {'status': 1,
+    async def __call__(self, 
+                      dialogue: List[Dict[str, Any]],
+                      trace=None,
+                      parent_span=None) -> Dict:
+        """
+        Main evaluation pipeline with Langfuse tracing.
+        
+        Steps:
+        1. Classify utterances to criteria
+        2. Evaluate each criterion
+        3. Calculate scores
+        
+        Args:
+            dialogue: List of dialogue segments (sales utterances)
+            trace: Langfuse trace object (optional)
+            parent_span: Parent span for nested tracking (optional)
+            
+        Returns:
+            Dictionary with:
+            {
+                'status': 1 (success) or -1 (failed),
+                'criteria_evals': List of criterion evaluations,
+                'message': Status message
+            }
+        """
+        try:
+            logger.info("="*60)
+            logger.info("Starting sales script evaluation pipeline")
+            logger.info("="*60)
+            
+            # ==========================================
+            # Step 1: Classify Utterances
+            # ==========================================
+            logger.info("Step 1: Classifying utterances to criteria...")
+            
+            sale_texts = self.classify_utterances_to_criteria(
+                utterances=dialogue,
+                trace=trace,
+                parent_span=parent_span
+            )
+            
+            # ==========================================
+            # Step 2: Evaluate Each Criterion
+            # ==========================================
+            if parent_span:
+                eval_span = parent_span.span(
+                    name="evaluate_criteria",
+                    input={
+                        "num_classified_groups": len(sale_texts)
+                    }
+                )
+            
+            logger.info("Step 2: Evaluating each criterion...")
+            
+            chain = self.eval_prompt | self.llm
+            
+            response = chain.invoke({
+                "sale_texts": sale_texts,
+                "step_detail": self.step_detail
+            })
+            
+            response_content = response.content
+            
+            # Log to Langfuse
+            if trace and LANGFUSE_ENABLED:
+                token_usage = response.response_metadata.get('token_usage', {})
+                log_generation(
+                    trace=trace,
+                    name="llm_evaluate_criteria",
+                    model=self.model,
+                    input_data={
+                        "num_criteria_groups": len(sale_texts),
+                        "step_detail_length": len(self.step_detail)
+                    },
+                    output_data=response_content,
+                    metadata={
+                        "step": "evaluate_sales_criteria",
+                        "evaluation_type": "sales_script",
+                        "temperature": 0.0
+                    },
+                    usage={
+                        "prompt_tokens": token_usage.get('prompt_tokens', 0),
+                        "completion_tokens": token_usage.get('completion_tokens', 0),
+                        "total_tokens": token_usage.get('total_tokens', 0)
+                    }
+                )
+            
+            logger.info(f"LLM evaluation response (first 500 chars):\n{response_content[:500]}")
+            
+            # Parse evaluation results
+            try:
+                criteria_evals = literal_eval(response_content)
+                
+                if parent_span:
+                    eval_span.end(
+                        output={
+                            "status": "success",
+                            "num_criteria_evaluated": len(criteria_evals)
+                        }
+                    )
+                
+                logger.info(f"✓ Successfully evaluated {len(criteria_evals)} criteria")
+                
+            except (ValueError, SyntaxError) as parse_err:
+                error_msg = f"Failed to parse evaluation response: {parse_err}"
+                logger.error(error_msg)
+                logger.error(f"Raw response:\n{response_content}")
+                
+                if parent_span:
+                    eval_span.end(
+                        output={
+                            "status": "error",
+                            "error": str(parse_err),
+                            "raw_response_preview": response_content[:200]
+                        }
+                    )
+                
+                return {
+                    'status': -1,
+                    'criteria_evals': [],
+                    'message': error_msg
+                }
+            
+            # ==========================================
+            # Step 3: Calculate Scores
+            # ==========================================
+            logger.info("Step 3: Calculating scores...")
+            
+            criteria_evals = self.score_and_response(
+                criteria_evals,
+                self.criteria_score
+            )
+            
+            total_score = sum(c['score'] for c in criteria_evals)
+            
+            logger.info("="*60)
+            logger.info(f"✓ Script evaluation completed successfully")
+            logger.info(f"✓ Total score: {total_score:.2f}")
+            logger.info("="*60)
+            
+            return {
+                'status': 1,
                 'criteria_evals': criteria_evals,
-                'message': 'Success'}
+                'message': 'Success'
+            }
+            
+        except Exception as e:
+            error_msg = f"Unexpected error in script evaluation: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            
+            if parent_span:
+                error_span = parent_span.span(
+                    name="error_handling",
+                    input={
+                        "error": str(e),
+                        "error_type": type(e).__name__
+                    }
+                )
+                error_span.end(output={"status": "failed"})
+            
+            return {
+                'status': -1,
+                'criteria_evals': [],
+                'message': error_msg
+            }
