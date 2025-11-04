@@ -203,11 +203,7 @@ class QAMainEvaluator:
             logger.info("Start evaluating sales skills...")
             
             # Sub-step 1: Get dialogue (tracked inside qa_evaluator)
-            if span:
-                dialogue_span = span.span(
-                    name="get_dialogue_api",
-                    input={"audio_size_bytes": len(audio_bytes)}
-                )
+            
             
             # Note: dialogue API call happens inside run_evaluate
             # We'll track it by wrapping the call
@@ -219,10 +215,7 @@ class QAMainEvaluator:
                 parent_span=span
             )
             
-            if span:
-                dialogue_span.end(
-                    output={"status": result.get('status')}
-                )
+            
             
             if result['status'] != 1:
                 if span:

@@ -15,8 +15,9 @@ api_key = os.getenv("OPENAI_API_KEY")
 
 def create_csvdatabase(csv_path: str,
                        db_path: str,
+                       force_rebuild: bool = False
                        ) -> Chroma:
-    if not os.path.exists(db_path):
+    if not os.path.exists(db_path) or force_rebuild:
         logger.info("Creating new Chroma database...")
         loader = CSVLoader(file_path=csv_path,
                            metadata_columns=['criteria_id', 'criteria_name', 'criteria_description', 'criteria_actions'],

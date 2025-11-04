@@ -8,6 +8,8 @@ from fastapi import FastAPI
 import fastapi
 import argparse
 import uvicorn
+import requests
+import tempfile
 
 
 app = FastAPI()
@@ -16,8 +18,30 @@ app = FastAPI()
 def get_root_url(request: fastapi.Request, route_path: str, root_path) -> str:
     return "https://speech.aiservice.vn/asr/cloud_qa_demo"
 
-async def process_audio_and_evaluate(audio_file_path, progress=gr.Progress()):
+
+def download_audio_from_url(url: str):
+    try:
+        r = requests.get(url, allow_redirects=True)
+        if r.status_code != 200:
+            return f"Lỗi tải file (status {r.status_code})"
+        # Tạo file tạm và đoán phần mở rộng từ URL
+        ext = url.split('.')[-1] if '.' in url else 'wav'
+        temp_file = tempfile.NamedTemporaryFile(suffix=f".{ext}", delete=False)
+        temp_file.write(r.content)
+        temp_file.close()
+        # (Tùy chọn) Convert sang WAV nếu bạn cần đầu vào chuẩn
+        audio = AudioSegment.from_file(temp_file.name)
+        wav_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+        audio.export(wav_file.name, format="wav")
+        return wav_file.name
+    except Exception as e:
+        return f"Lỗi: {e}"
+
+
+async def process_audio_and_evaluate(audio_file_path, audio_url, progress=gr.Progress()):
     """Xử lý audio qua API"""
+    if audio_file_path is None and audio_url:
+        audio_file_path = download_audio_from_url(audio_url)
     report_str = "Đang xử lý..."
     if not audio_file_path or not os.path.exists(audio_file_path):
         return "❌ Vui lòng tải lên một file âm thanh hợp lệ."
@@ -110,10 +134,11 @@ with gr.Blocks(title="Demo đánh giá chất lượng cuộc gọi", theme=gr.t
         with gr.Column(scale=2):
             gr.Markdown("## 📤 Bước 1: Tải lên file audio")
             audio_input = gr.Audio(
-                label="🎙️ Chọn file audio (.wav, .mp3, .m4a)",
+                label="🎙️ Tải audio từ máy tính (.wav, .mp3, .m4a)",
                 type="filepath",
                 elem_classes="audio-input"
             )
+            audio_url = gr.Textbox(label="Hoặc nhập URL audio")
             analyze_btn = gr.Button(
                 "🚀 Bắt đầu xử lý",
                 variant="primary",
@@ -158,15 +183,14 @@ with gr.Blocks(title="Demo đánh giá chất lượng cuộc gọi", theme=gr.t
     # Kết nối events
     analyze_btn.click(
         fn=process_audio_and_evaluate,
-        inputs=[audio_input],
+        inputs=[audio_input, audio_url],
         outputs=[report_output]
     )
     # Footer
     gr.Markdown("""
     ---
     <div style="text-align: center; color: #666; font-size: 13px; padding: 20px;">
-        <p><b>🔧 Powered by AI Speech Team</b></p>
-        <p>⚡ Fast • 🎯 Accurate • 🔒 Secure</p>
+        <p><b>🔧 Powered by Admicro AI Speech Team</b></p>
     </div>
     """)
 
@@ -176,6 +200,6 @@ if __name__ == "__main__":
     parser.add_argument("--server_name", type=str, default="0.0.0.0")
     parser.add_argument("--server_port", type=int, default=7860)
     args = parser.parse_args()
-    
+
     app = gr.mount_gradio_app(app, demo, path="/")
-    uvicorn.run(app, host="0.0.0.0", port=args.server_port)
+    uvicorn.run(app, host=args.server_name, port=args.server_port)

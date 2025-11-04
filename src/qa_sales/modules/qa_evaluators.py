@@ -31,6 +31,13 @@ class QASalesEvaluator:
         df = pd.read_csv(csv_path, delimiter="\t")
         self.criteria_name = dict(zip(df['criteria_id'], df['criteria_name']))
 
+    def rebuild_database(self,
+                         csv_path: str,
+                         db_path: str):
+        self.sale_script_db = create_csvdatabase(csv_path=csv_path,
+                                                 db_path=db_path,
+                                                 force_rebuild=True)
+
     def process_result(self, results: List[Dict]):
         """Format evaluation results into readable text."""
         detail_result = "Đánh giá kỹ năng bán hàng theo các tiêu chí:\n"
