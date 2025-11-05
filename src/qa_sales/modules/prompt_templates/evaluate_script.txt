@@ -39,11 +39,10 @@
 		  - Nội dung trong "Note" chỉ được sử dụng dấu gạch đầu dòng (-), không có dấu ngoặc, không bao quanh bởi dấu nháy kép hoặc dấu ngoặc đơn
 
 [Sale Desc]: Lời thoại của nhân viên được chia vào các tiêu chí tương ứng. Cấu trúc có dạng như sau:
-	criteria ID: số thứ tự của tiêu chí
-	- Lời thoại 1 của nhân viên sale ứng với tiêu chí đó
-	- Lời thoại 2 của nhân viên sale ứng với tiêu chí đó
-	...
-	- Lời thoại n của nhân viên sale ứng với tiêu chí đó
+	Lời thoại của tiêu chí: <tên criteria>:
+	  	- <Lời thoại 1 tương ứng với tiêu chí vừa nêu tên>
+	  	- <Lời thoại 2 tương ứng với tiêu chí vừa nêu tên>
+	  	...
 
 [Criteria Desc]: Mỗi tiêu chí bao gồm số thứ tự (criteria ID), tên tiêu chí (criteria Name) và Các hành động tương ứng (step Criteria). Cấu trúc có dạng như sau:
 	criteria ID: số thứ tự của tiêu chí

@@ -157,17 +157,8 @@ class ScriptEvaluator:
             )
 
         # Parse response - try multiple parsers
-        sale_texts = None
+        sale_texts = response_content
         parse_error = None
-
-        for parse_fn in (json.loads, literal_eval):
-            try:
-                sale_texts = parse_fn(response_content)
-                logger.info(f"✓ Successfully parsed with {parse_fn.__name__}")
-                break
-            except Exception as e:
-                parse_error = e
-                logger.debug(f"Parser {parse_fn.__name__} failed: {e}")
 
         if sale_texts is None:
             error_msg = f"Failed to parse classify response: {parse_error}"
