@@ -1,15 +1,18 @@
 # -*- coding: utf-8 -*-
-import gradio as gr
+import argparse
 import os
+import tempfile
+import sys
+import fastapi
+import gradio as gr
+import requests
+import uvicorn
+from fastapi import FastAPI
 from pydub import AudioSegment
+from loguru import logger
+
 from src.qa_communicate.audio_processing.qa import call_qa_api
 from src.qa_communicate.core.utils import create_task_id
-from fastapi import FastAPI
-import fastapi
-import argparse
-import uvicorn
-import requests
-import tempfile
 
 
 app = FastAPI()
@@ -20,12 +23,13 @@ def get_root_url(request: fastapi.Request, route_path: str, root_path) -> str:
 
 
 def download_audio_from_url(url: str):
+    url = url.strip()
     try:
         r = requests.get(url, allow_redirects=True)
         if r.status_code != 200:
             return f"Lỗi tải file (status {r.status_code})"
         # Tạo file tạm và đoán phần mở rộng từ URL
-        ext = url.split('.')[-1] if '.' in url else 'wav'
+        ext = url.split(".")[-1] if "." in url else "wav"
         temp_file = tempfile.NamedTemporaryFile(suffix=f".{ext}", delete=False)
         temp_file.write(r.content)
         temp_file.close()
@@ -33,21 +37,25 @@ def download_audio_from_url(url: str):
         audio = AudioSegment.from_file(temp_file.name)
         wav_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
         audio.export(wav_file.name, format="wav")
+        logger.info(f"Tải và chuyển đổi audio thành công: {wav_file.name}")
         return wav_file.name
     except Exception as e:
-        return f"Lỗi: {e}"
+        logger.error(f"Lỗi khi tải audio từ URL {url}: {str(e)}")
+        return None
 
 
-async def process_audio_and_evaluate(audio_file_path, audio_url, progress=gr.Progress()):
+async def process_audio_and_evaluate(
+    audio_file_path, audio_url, progress=gr.Progress()
+):
     """Xử lý audio qua API"""
     if audio_file_path is None and audio_url:
         audio_file_path = download_audio_from_url(audio_url)
     report_str = "Đang xử lý..."
-    if not audio_file_path or not os.path.exists(audio_file_path):
+    if audio_file_path is None or not os.path.exists(audio_file_path):
         return "❌ Vui lòng tải lên một file âm thanh hợp lệ."
     progress(0.1, desc="📁 Đang đọc file audio...")
     try:
-        with open(audio_file_path, 'rb') as f:
+        with open(audio_file_path, "rb") as f:
             audio_bytes = f.read()
     except Exception as e:
         return f"❌ Lỗi đọc file: {str(e)}"
@@ -61,21 +69,27 @@ async def process_audio_and_evaluate(audio_file_path, audio_url, progress=gr.Pro
             task_id=task_id,
             max_poll_seconds=180.0,
             poll_interval_seconds=2.0,
-            verbose=True
+            verbose=True,
         )
     except Exception as e:
         return f"❌ Lỗi khi gọi API: {str(e)}"
 
     progress(0.8, desc="📊 Đang xử lý kết quả...")
-    if result.get('status') != 1:
-        error_msg = result.get('message', 'Không xác định')
+    if result.get("status") != 1:
+        error_msg = result.get("message", "Không xác định")
         return f"❌ Lỗi từ API: {error_msg}"
-    dialogue_report = result.get('result', '')
-    task_id = result.get('task_id', '')
+    dialogue_report = result.get("result", "")
+    task_id = result.get("task_id", "")
     report_lines = []
-    report_lines.append("╔════════════════════════════════════════════════════════════════╗")
-    report_lines.append(f"║              📊 BÁO CÁO ĐÁNH GIÁ.ID cuộc gọi: {task_id}       ║")
-    report_lines.append("╚════════════════════════════════════════════════════════════════╝")
+    report_lines.append(
+        "╔════════════════════════════════════════════════════════════════╗"
+    )
+    report_lines.append(
+        f"║              📊 BÁO CÁO ĐÁNH GIÁ.ID cuộc gọi: {task_id}       ║"
+    )
+    report_lines.append(
+        "╚════════════════════════════════════════════════════════════════╝"
+    )
     report_lines.append("")
     if dialogue_report:
         if isinstance(dialogue_report, str):
@@ -85,11 +99,14 @@ async def process_audio_and_evaluate(audio_file_path, audio_url, progress=gr.Pro
     else:
         report_lines.append("⚠️ API trả về thành công nhưng không có báo cáo.")
     report_lines.append("")
-    report_lines.append("═══════════════════════════════════════════════════════════════")
+    report_lines.append(
+        "═══════════════════════════════════════════════════════════════"
+    )
     report_lines.append("✅ Hoàn tất!")
     report_str = "\n".join(report_lines)
     progress(1.0, desc="✅ Hoàn thành!")
     return report_str
+
 
 custom_css = """
 .gradio-container {
@@ -124,29 +141,34 @@ custom_css = """
 }
 """
 
-with gr.Blocks(title="Demo đánh giá chất lượng cuộc gọi", theme=gr.themes.Soft(), css=custom_css) as demo:
+with gr.Blocks(
+    title="Demo đánh giá chất lượng cuộc gọi", theme=gr.themes.Soft(), css=custom_css
+) as demo:
     # Header
     with gr.Row(elem_classes="main-header"):
-        gr.Markdown("""
+        gr.Markdown(
+            """
         #  Demo đánh giá chất lượng cuộc gọi 
-        """)
+        """
+        )
     with gr.Row():
         with gr.Column(scale=2):
             gr.Markdown("## 📤 Bước 1: Tải lên file audio")
             audio_input = gr.Audio(
                 label="🎙️ Tải audio từ máy tính (.wav, .mp3, .m4a)",
                 type="filepath",
-                elem_classes="audio-input"
+                elem_classes="audio-input",
             )
             audio_url = gr.Textbox(label="Hoặc nhập URL audio")
             analyze_btn = gr.Button(
                 "🚀 Bắt đầu xử lý",
                 variant="primary",
                 size="lg",
-                elem_classes="analyze-button"
+                elem_classes="analyze-button",
             )
             with gr.Group(elem_classes="info-box"):
-                gr.Markdown("""### 📋 Hướng dẫn sử dụng:
+                gr.Markdown(
+                    """### 📋 Hướng dẫn sử dụng:
                 
                 1. 📁 **Tải file**: Chọn file audio từ máy tính
                 2. ▶️ **Bắt đầu**: Nhấn nút "Bắt đầu Xử lý"
@@ -162,7 +184,7 @@ with gr.Blocks(title="Demo đánh giá chất lượng cuộc gọi", theme=gr.t
                 7. **Lưu ý**: trong quá trình test các chị note lại giúp em ID cuộc gọi được ghi
 		ở đầu báo cáo để sau này bọn em dễ đối chiếu và cải thiện kết quả. Em cảm ơn các chị nhiều !
 """
-)
+                )
         with gr.Column(scale=3):
             gr.Markdown("## 📊 Kết quả đánh giá")
             report_output = gr.Textbox(
@@ -172,28 +194,29 @@ with gr.Blocks(title="Demo đánh giá chất lượng cuộc gọi", theme=gr.t
                 interactive=False,
                 show_copy_button=True,
                 placeholder="🔄 Kết quả xử lý sẽ hiển thị tại đây...\n\n"
-                           "Sau khi tải file và nhấn 'Bắt đầu Xử lý',\n"
-                           "hệ thống sẽ:\n\n"
-                           "• Gửi audio đến API\n"
-                           "• Poll kết quả định kỳ\n"
-                           "• Hiển thị thông tin chi tiết\n\n"
-                           "Vui lòng đợi trong giây lát...",
-                elem_classes="report-box"
+                "Sau khi tải file và nhấn 'Bắt đầu Xử lý',\n"
+                "hệ thống sẽ:\n\n"
+                "• Gửi audio đến API\n"
+                "• Poll kết quả định kỳ\n"
+                "• Hiển thị thông tin chi tiết\n\n"
+                "Vui lòng đợi trong giây lát...",
+                elem_classes="report-box",
             )
     # Kết nối events
     analyze_btn.click(
         fn=process_audio_and_evaluate,
         inputs=[audio_input, audio_url],
-        outputs=[report_output]
+        outputs=[report_output],
     )
     # Footer
-    gr.Markdown("""
+    gr.Markdown(
+        """
     ---
     <div style="text-align: center; color: #666; font-size: 13px; padding: 20px;">
         <p><b>🔧 Powered by Admicro AI Speech Team</b></p>
     </div>
-    """)
-
+    """
+    )
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Audio Processing QA System")
@@ -202,4 +225,23 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     app = gr.mount_gradio_app(app, demo, path="/")
+    log_dir = os.getcwd()
+    log_level = "INFO"
+    log_format = "<green>{time:YYYY-MM-DD HH:mm:ss.SSS zz}</green> | <level>{level: <8}</level> | <yellow>Line {line: >4} ({file}):</yellow> <b>{message}</b>"
+    logger.add(
+        sys.stderr,
+        level=log_level,
+        format=log_format,
+        colorize=True,
+        backtrace=True,
+        diagnose=True,
+    )
+    logger.add(
+        os.path.join(log_dir, "ui.log"),
+        level=log_level,
+        format=log_format,
+        colorize=False,
+        backtrace=True,
+        diagnose=True,
+    )
     uvicorn.run(app, host=args.server_name, port=args.server_port)

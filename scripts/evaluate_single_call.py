@@ -1,9 +1,9 @@
 import asyncio
-import sys
 import json
-from pathlib import Path
 import os
+import sys
 from datetime import datetime
+from pathlib import Path
 
 # Thêm thư mục src vào Python path
 project_root = Path(__file__).resolve().parent.parent
@@ -48,20 +48,20 @@ async def main():
         print("\nBước 1: Bắt đầu phân tích đặc trưng âm học...")
         analysis_result = await extract_features(audio_bytes)
 
-        if analysis_result.get('status') != 1:
+        if analysis_result.get("status") != 1:
             print("Phân tích âm học thất bại. Dừng chương trình.")
-            print(analysis_result.get('message'))
+            print(analysis_result.get("message"))
             return
-            
+
         print("Phân tích âm học thành công!")
 
         # 3. Gửi dữ liệu tới LLM để chấm điểm
         print("\nBước 2: Gửi dữ liệu tới LLM để chấm điểm...")
         data_for_llm = {
-            'metadata': analysis_result.get('metadata'),
-            'segments': analysis_result.get('segments')
+            "metadata": analysis_result.get("metadata"),
+            "segments": analysis_result.get("segments"),
         }
-      
+
         evaluation_result = await get_qa_evaluation(data_for_llm)
 
         # 4. In và LƯU kết quả cuối cùng
@@ -76,7 +76,7 @@ async def main():
             output_path = RESULTS_DIR / output_filename
 
             # Lưu kết quả vào file
-            with open(output_path, 'w', encoding='utf-8') as f:
+            with open(output_path, "w", encoding="utf-8") as f:
                 f.write(result_str)
             print(f"\n✅ Đã lưu kết quả thành công vào file: {output_path}")
 

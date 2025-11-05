@@ -1,7 +1,8 @@
+import json
+import os
+
 import openai
 from dotenv import load_dotenv
-import os
-import json
 
 # Tải các biến từ file .env vào môi trường
 load_dotenv()
@@ -24,12 +25,14 @@ client = openai.AsyncOpenAI(
     api_key=API_KEY,
     base_url=API_BASE_URL,
 )
+
+
 def build_prompt(call_data: dict) -> str:
     """
     Xây dựng chuỗi prompt hoàn chỉnh dựa trên file tiêu chí chấm điểm CSV và dữ liệu cuộc gọi.
     """
     call_data_str = json.dumps(call_data, indent=2, ensure_ascii=False)
-    
+
     prompt_template = f"""
 Bạn là một chuyên gia đánh giá chất lượng (QA) cuộc gọi cực kỳ chi tiết. Nhiệm vụ của bạn là chấm điểm cuộc gọi dựa trên các tiêu chí trong nhóm "Kỹ năng giao tiếp" được trích xuất từ file quy định và các dữ liệu âm học đã được phân tích.
 
@@ -95,26 +98,32 @@ YÊU CẦU ĐẦU RA (OUTPUT FORMAT): Hãy trả về một đối tượng JSON
 """
     return prompt_template
 
-async def get_qa_evaluation(call_data: dict) -> dict: 
-    """ Gửi prompt đến LLM và nhận kết quả đánh giá QA, tối ưu hóa cho LiteLLM. """ 
+
+async def get_qa_evaluation(call_data: dict) -> dict:
+    """Gửi prompt đến LLM và nhận kết quả đánh giá QA, tối ưu hóa cho LiteLLM."""
     prompt = build_prompt(call_data)
 
     try:
         if client is None:
-            return {"error": "Thiếu cấu hình OPENAI_API_KEY/OPENAI_API_BASE trong môi trường"}
+            return {
+                "error": "Thiếu cấu hình OPENAI_API_KEY/OPENAI_API_BASE trong môi trường"
+            }
         if not MODEL_NAME:
             return {"error": "Thiếu MODEL_NAME trong môi trường"}
         response = await client.chat.completions.create(
             model=MODEL_NAME,
             messages=[
-                {"role": "system", "content": "You are an expert QA system. Your sole purpose is to return a valid, complete JSON object based on the user's request. Do not include any other text, explanations, or markdown formatting outside of the JSON structure."},
-                {"role": "user", "content": prompt}
-            ]
+                {
+                    "role": "system",
+                    "content": "You are an expert QA system. Your sole purpose is to return a valid, complete JSON object based on the user's request. Do not include any other text, explanations, or markdown formatting outside of the JSON structure.",
+                },
+                {"role": "user", "content": prompt},
+            ],
         )
-    
+
         result_content = response.choices[0].message.content
-    
-    # Xử lý trường hợp model vẫn trả về khối mã markdown
+
+        # Xử lý trường hợp model vẫn trả về khối mã markdown
         if result_content.strip().startswith("```json"):
             result_content = result_content.strip()[7:-3]
 
@@ -123,7 +132,10 @@ async def get_qa_evaluation(call_data: dict) -> dict:
     except json.JSONDecodeError as json_err:
         print(f"Lỗi khi parse JSON: {json_err}")
         print(f"Nội dung nhận được từ model: {result_content}")
-        return {"error": "Lỗi khi phân tích JSON từ model.", "raw_response": result_content}
+        return {
+            "error": "Lỗi khi phân tích JSON từ model.",
+            "raw_response": result_content,
+        }
     except Exception as e:
         print(f"Lỗi khi gọi API của LLM: {e}")
         return {"error": str(e)}

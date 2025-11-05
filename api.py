@@ -1,20 +1,26 @@
+import argparse
+import os
+import sys
+import threading
+from datetime import datetime
+from time import perf_counter
+from urllib.request import urlopen
+
+import jwt
+import uvicorn
 from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.responses import JSONResponse
-from datetime import datetime
 from loguru import logger
-from src.qa_communicate.core.utils import is_url, is_audio_file, create_task_id, write_json
-from urllib.request import urlopen
-from src.main_evaluator import QAMainEvaluator
 from watchdog.observers import Observer
+
+from src.main_evaluator import QAMainEvaluator
+from src.qa_communicate.core.utils import (
+    is_url,
+    is_audio_file,
+    create_task_id,
+    write_json,
+)
 from src.utils.file_handlers import CSVWatcher
-import os, threading, time
-from time import perf_counter
-import uvicorn
-import jwt
-import os
-import argparse
-
-
 
 app = FastAPI()
 PRIVATE_TOKEN = "41ad97aa3c747596a4378cc8ba101fe70beb3f5f70a75407a30e6ddab668310d"
@@ -22,36 +28,46 @@ PRIVATE_TOKEN = "41ad97aa3c747596a4378cc8ba101fe70beb3f5f70a75407a30e6ddab668310
 
 def start_file_watcher():
     observer = Observer()
-    observer.schedule(csv_watcher, path=os.path.dirname(args.csv_path) or ".", recursive=False)
+    observer.schedule(
+        csv_watcher, path=os.path.dirname(args.csv_path) or ".", recursive=False
+    )
     observer.start()
     print("CSV watcher started.")
     return observer
 
 
-async def get_qa(audio_bytes: bytes,
-                 task_id: int,
-                 done_json_file_path: str = None,
-                 running_json_file_path: str = None):
-    rs = {"status": 0, "task_id": task_id, "result": {},
-          "message": "Start evaluating", "code": 202}
+async def get_qa(
+    audio_bytes: bytes,
+    task_id: int,
+    done_json_file_path: str = None,
+    running_json_file_path: str = None,
+):
+    rs = {
+        "status": 0,
+        "task_id": task_id,
+        "result": {},
+        "message": "Start evaluating",
+        "code": 202,
+    }
+    logger.info(f"Task {task_id} is started")
     write_json(rs, running_json_file_path)
     start = perf_counter()
-    result = await main_evaluator.run_evaluate(audio_bytes=audio_bytes,
-                                               task_id=task_id)
+    result = await main_evaluator.run_evaluate(audio_bytes=audio_bytes, task_id=task_id)
     end = perf_counter()
-    rs = {"status": result['status'],
-          "task_id": task_id,
-          "inference_time": round(end - start, 2),
-          "result": result.get('final_detail_result', {}),
-          "segments": result.get('segments', []),
-          "message": result['message'],
-          "code": result['code']}
-    if result['status'] == 1:
+    rs = {
+        "status": result["status"],
+        "task_id": task_id,
+        "inference_time": round(end - start, 2),
+        "result": result.get("final_detail_result", {}),
+        "segments": result.get("segments", []),
+        "message": result["message"],
+        "code": result["code"],
+    }
+    if result["status"] == 1:
         logger.info(f"Task {task_id} is done")
     else:
         logger.error(f"Task {task_id} failed with message: {result['message']}")
     write_json(rs, done_json_file_path)
-
 
 
 @app.on_event("startup")
@@ -68,12 +84,9 @@ def get():
 async def post(request: Request, bg_task: BackgroundTasks):
     token = request.headers.get("Authorization", None)
     if not token:
-        return JSONResponse({
-            "status": -1,
-            "code": 400,
-            "message": "Token is missing",
-            "data": {}
-        })
+        return JSONResponse(
+            {"status": -1, "code": 400, "message": "Token is missing", "data": {}}
+        )
 
     if token == PRIVATE_TOKEN:
         pass
@@ -81,19 +94,23 @@ async def post(request: Request, bg_task: BackgroundTasks):
         try:
             token = jwt.decode(token, "datamining_vcc", algorithms="HS256")
         except jwt.ExpiredSignatureError:
-            return JSONResponse({
-                "status": -1,
-                "message": "Signature expired. Please log in again",
-                "data": {},
-                "code": 401
-            })
+            return JSONResponse(
+                {
+                    "status": -1,
+                    "message": "Signature expired. Please log in again",
+                    "data": {},
+                    "code": 401,
+                }
+            )
         except jwt.InvalidTokenError:
-            return JSONResponse({
-                "status": -1,
-                "message": "Invalid token. Please log in again",
-                "data": {},
-                "code": 400
-            })
+            return JSONResponse(
+                {
+                    "status": -1,
+                    "message": "Invalid token. Please log in again",
+                    "data": {},
+                    "code": 400,
+                }
+            )
     current_month = datetime.now().strftime("%Y-%m")
     save_path = os.path.join(os.getcwd(), f"tasks_{current_month}")
     os.makedirs(save_path, exist_ok=True)
@@ -113,45 +130,55 @@ async def post(request: Request, bg_task: BackgroundTasks):
                     task_id = create_task_id(audio_bytes=bytes)
                 audio_bytes = bytes
             else:
-                return JSONResponse({
-                    "status": -1,
-                    "message": "Only accept file url and bytes",
-                    "code": 400
-                    })
+                return JSONResponse(
+                    {
+                        "status": -1,
+                        "message": "Only accept file url and bytes",
+                        "code": 400,
+                    }
+                )
     except Exception:
-        return JSONResponse({
-            "status": -1,
-            "message": "Only accept file url and bytes",
-            "code": 400
-        })
-    done_json_file_path = os.path.join(save_path, f'{task_id}_done.json')
-    running_json_file_path = os.path.join(save_path, f'{task_id}_running.json')
+        return JSONResponse(
+            {"status": -1, "message": "Only accept file url and bytes", "code": 400}
+        )
+    done_json_file_path = os.path.join(save_path, f"{task_id}_done.json")
+    running_json_file_path = os.path.join(save_path, f"{task_id}_running.json")
 
     if not os.path.exists(done_json_file_path):
         if not os.path.exists(running_json_file_path):
-            bg_task.add_task(get_qa, audio_bytes, task_id,
-                             done_json_file_path,
-                             running_json_file_path)
-            return JSONResponse({
-                "status": 0,
-                "message": f"Task {task_id} is started",
-                "task_id": task_id,
-                "code": 202
-            })
+            bg_task.add_task(
+                get_qa,
+                audio_bytes,
+                task_id,
+                done_json_file_path,
+                running_json_file_path,
+            )
+            return JSONResponse(
+                {
+                    "status": 0,
+                    "message": f"Task {task_id} is started",
+                    "task_id": task_id,
+                    "code": 202,
+                }
+            )
         else:
-            return JSONResponse({
-                "status": 0,
-                "message": f"Task {task_id} is already running",
-                "task_id": task_id,
-                "code": 202
-            })
+            return JSONResponse(
+                {
+                    "status": 0,
+                    "message": f"Task {task_id} is already running",
+                    "task_id": task_id,
+                    "code": 202,
+                }
+            )
     else:
-        return JSONResponse({
-            "status": 1,
-            "message": f"Task {task_id} is complete",
-            "task_id": task_id,
-            "code": 200,
-        })
+        return JSONResponse(
+            {
+                "status": 1,
+                "message": f"Task {task_id} is complete",
+                "task_id": task_id,
+                "code": 200,
+            }
+        )
 
 
 # ==================== SHUTDOWN HANDLER ====================
@@ -167,21 +194,59 @@ if __name__ == "__main__":
     parser.add_argument("--host", type=str, default="0.0.0.0")
     parser.add_argument("--port", type=int, default=8000)
     parser.add_argument("--gpt_model", type=str, default="gpt-4.1-mini")
-    parser.add_argument("--csv_path", type=str, default="src/qa_sales/modules/databases/salescript.tsv")
-    parser.add_argument("--eval_prompt_template", type=str, default="src/qa_sales/modules/prompt_templates/evaluate_script.txt")
-    parser.add_argument("--preprocess_prompt_template", type=str, default="src/qa_sales/modules/prompt_templates/preprocess.txt")
-    parser.add_argument("--classify_prompt_template", type=str, default="src/qa_sales/modules/prompt_templates/classify_utterances.txt")
-    parser.add_argument("--db_path", type=str, default="src/qa_sales/modules/databases/salescript_db")
+    parser.add_argument(
+        "--csv_path", type=str, default="src/qa_sales/modules/databases/salescript.tsv"
+    )
+    parser.add_argument(
+        "--eval_prompt_template",
+        type=str,
+        default="src/qa_sales/modules/prompt_templates/evaluate_script.txt",
+    )
+    parser.add_argument(
+        "--preprocess_prompt_template",
+        type=str,
+        default="src/qa_sales/modules/prompt_templates/preprocess.txt",
+    )
+    parser.add_argument(
+        "--classify_prompt_template",
+        type=str,
+        default="src/qa_sales/modules/prompt_templates/classify_utterances.txt",
+    )
+    parser.add_argument(
+        "--db_path", type=str, default="src/qa_sales/modules/databases/salescript_db"
+    )
     args = parser.parse_args()
-    main_evaluator = QAMainEvaluator(gpt_model=args.gpt_model,
-                                     csv_path=args.csv_path,
-                                     eval_prompt_template=args.eval_prompt_template,
-                                     preprocess_prompt_template=args.preprocess_prompt_template,
-                                     classify_prompt_template=args.classify_prompt_template,
-                                     db_path=args.db_path)
+    main_evaluator = QAMainEvaluator(
+        gpt_model=args.gpt_model,
+        csv_path=args.csv_path,
+        eval_prompt_template=args.eval_prompt_template,
+        preprocess_prompt_template=args.preprocess_prompt_template,
+        classify_prompt_template=args.classify_prompt_template,
+        db_path=args.db_path,
+    )
 
-    csv_watcher = CSVWatcher(csv_path=args.csv_path,
-                             db_path=args.db_path,
-                             reload_callback=main_evaluator.qa_evaluator.rebuild_database)
+    csv_watcher = CSVWatcher(
+        csv_path=args.csv_path,
+        db_path=args.db_path,
+        reload_callback=main_evaluator.qa_evaluator.rebuild_database,
+    )
+    log_dir = os.getcwd()
+    log_level = "INFO"
+    log_format = "<green>{time:YYYY-MM-DD HH:mm:ss.SSS zz}</green> | <level>{level: <8}</level> | <yellow>Line {line: >4} ({file}):</yellow> <b>{message}</b>"
+    logger.add(
+        sys.stderr,
+        level=log_level,
+        format=log_format,
+        colorize=True,
+        backtrace=True,
+        diagnose=True,
+    )
+    logger.add(
+        os.path.join(log_dir, "file.log"),
+        level=log_level,
+        format=log_format,
+        colorize=False,
+        backtrace=True,
+        diagnose=True,
+    )
     uvicorn.run(app, host=args.host, port=args.port)
-

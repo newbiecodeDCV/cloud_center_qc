@@ -1,33 +1,28 @@
 """
 Database connection và session management
 """
-import os
-from pathlib import Path
+
 from contextlib import contextmanager
+from pathlib import Path
+
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, Session
 from sqlalchemy.pool import StaticPool
 
 from .models import Base
 
-
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 DATABASE_DIR = PROJECT_ROOT / "data"
 DATABASE_DIR.mkdir(parents=True, exist_ok=True)
 DATABASE_PATH = DATABASE_DIR / "qa_database.db"
 
-
 DATABASE_URL = f"sqlite:///{DATABASE_PATH}"
-
 
 engine = create_engine(
     DATABASE_URL,
-    echo=False,  
-    connect_args={
-        "check_same_thread": False  
-    },
-    poolclass=StaticPool  
+    echo=False,
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
 )
 
 
@@ -63,7 +58,7 @@ def drop_db():
 def get_db() -> Session:
     """
     Context manager để lấy database session
-    
+
     Usage:
         with get_db() as db:
             result = db.query(Evaluation).all()
@@ -82,7 +77,7 @@ def get_db() -> Session:
 def get_db_session() -> Session:
     """
     Lấy database session (cho FastAPI dependency injection)
-    
+
     Usage trong FastAPI:
         def my_endpoint(db: Session = Depends(get_db_session)):
             ...

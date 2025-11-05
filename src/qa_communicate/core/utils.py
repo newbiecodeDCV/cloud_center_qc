@@ -1,8 +1,9 @@
 import base64
 import hashlib
-import magic
 import json
 import urllib.parse
+
+import magic
 
 
 def hash_str(string: str, n_hash: int = 9) -> int:
@@ -16,7 +17,7 @@ def hash_str(string: str, n_hash: int = 9) -> int:
     Trả về:
     - Số nguyên đại diện cho mã băm của chuỗi đầu vào.
     """
-    return int(hashlib.sha256(string.encode("utf-8")).hexdigest(), 16) % 10 ** n_hash
+    return int(hashlib.sha256(string.encode("utf-8")).hexdigest(), 16) % 10**n_hash
 
 
 def create_task_id(audio_bytes: bytes = None, url: str = None):
@@ -66,10 +67,9 @@ def is_url(string):
 def is_audio_file(file_bytes):
     mime = magic.Magic(mime=True)
     mime_type = mime.from_buffer(file_bytes)
-    return mime_type.startswith('audio')
+    return mime_type.startswith("audio")
 
 
-def write_json(data: dict,
-               json_file_path: str):
-    with open(json_file_path, 'w') as file:
+def write_json(data: dict, json_file_path: str):
+    with open(json_file_path, "w") as file:
         json.dump(data, file, indent=4)

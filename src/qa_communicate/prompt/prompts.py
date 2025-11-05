@@ -78,7 +78,8 @@ Hãy nghĩ từng bước trước khi đưa ra đánh giá từng tiêu chí
 ```
 """
 
+
 def build_qa_prompt(call_data: dict) -> str:
-    """ Xây dựng prompt chấm điểm QA bằng cách chèn dữ liệu cuộc gọi vào template. """
+    """Xây dựng prompt chấm điểm QA bằng cách chèn dữ liệu cuộc gọi vào template."""
     call_data_str = json.dumps(call_data, indent=2, ensure_ascii=False)
     return _QA_EVALUATION_TEMPLATE.format(call_data_str=call_data_str)
