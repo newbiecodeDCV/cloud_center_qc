@@ -301,10 +301,10 @@ class ScriptEvaluator:
             )
 
         logger.info("Step 2: Evaluating each criterion...")
-        self.eval_prompt = self.eval_prompt.format(
+        eval_prompt = self.eval_prompt.format(
             sale_texts=sale_texts, step_detail=self.step_detail
         )
-        messages = [{"role": "user", "content": self.eval_prompt}]
+        messages = [{"role": "user", "content": eval_prompt}]
 
         response = await acompletion(
             model="gpt-4.1-mini",
