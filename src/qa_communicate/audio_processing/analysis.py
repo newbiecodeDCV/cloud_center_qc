@@ -32,12 +32,16 @@ class AudioSegment:
 
 class AcousticAnalyzer:
     """Phân tích các đặc điểm acoustic của segment"""
+    # Từ đệm thực sự (filler words) - âm thanh do dự, không mang nghĩa
     FILLER_WORDS = {
-    'à', 'ạ', 'dạ', 'vâng', 'ừ', 'ừm', 'ờ', 'ơi', 'ấy', 'nhá', 'nha',
-    'hả', 'hử', 'ư', 'ê', 'ơ', 'chứ', 'thì', 'là', 'kiểu', 'dạng',
-    'đấy', 'nhỉ', 'nhé', 'vậy', 'nên', 'rồi', 'cái', 'ấy là', 'với',
-    'mình', 'bên', 'em', 'chị', 'anh', 'luôn', 'luôn ạ', 'dạ vâng', 'vầng'
-}
+        'ờ', 'ừm', 'ừ', 'à', 'ơ', 'ê', 'ư', 'hử',
+        'kiểu', 'dạng', 'ấy là', 'thì là', 'là là'
+    }
+    
+    # Từ lịch sự KHÔNG phải filler - GIỮ LẠI khi tính SPM và disfluency
+    POLITE_WORDS = {
+        'dạ', 'vâng', 'ạ', 'nhé', 'nhá', 'nha', 'nhỉ', 'ơi'
+    }
     
     def __init__(self, audio_data: np.ndarray, sample_rate: int, non_silent_intervals: List[Tuple[int, int]]):
         self.audio_data = audio_data
@@ -51,23 +55,32 @@ class AcousticAnalyzer:
                 'speed_spm': 0.0,
                 'volume_db': 0.0,
                 'pitch_hz': 0.0,
-                'silence_ratio': 0.0
+                'silence_ratio': 0.0,
+                'filler_count': 0,
+                'restart_count': 0,
+                'disfluency_rate': 0.0
             }
         
         speed_spm = self._calculate_spm(segment)
         volume_db = self._calculate_volume(segment)
         pitch_hz = self._calculate_pitch(segment)
         silence_ratio = self._calculate_silence_ratio(segment)
+        disfluency = self._calculate_disfluency_metrics(segment)
         
         return {
             'speed_spm': float(speed_spm),
             'volume_db': float(volume_db),
             'pitch_hz': float(pitch_hz),
-            'silence_ratio': float(silence_ratio)
+            'silence_ratio': float(silence_ratio),
+            **disfluency
         }
     
     def _calculate_spm(self, segment: AudioSegment) -> float:
-        """Tính tốc độ nói thực tế (SPM) sau khi lọc filler và từ ngắn"""
+        """Tính tốc độ nói (SPM - syllables per minute) cho tiếng Việt
+        
+        Lọc bỏ: từ đệm thực sự (ờ, ừm, à, kiểu...)
+        GIỮ LẠI: từ lịch sự (dạ, vâng, ạ), từ có nghĩa
+        """
         if segment.duration <= 0.3:
             return 0.0
 
@@ -82,10 +95,18 @@ class AcousticAnalyzer:
         if not cleaned:
             return 0.0
 
-        syllables: List[str] = cleaned.split()
+        # Tokenize tiếng Việt bằng underthesea
+        try:
+            words = word_tokenize(cleaned, format="text").split()
+        except:
+            # Fallback nếu underthesea lỗi
+            words = cleaned.split()
+        
+        # Lọc bỏ CHỈ từ đệm thực sự (ờ, ừm, à, kiểu...)
+        # GIỮ LẠI từ lịch sự (dạ, vâng, ạ) và từ có nghĩa
         content_syllables = [
-            s for s in syllables
-            if len(s) > 1 and s not in self.FILLER_WORDS
+            w for w in words
+            if len(w) > 1 and w not in self.FILLER_WORDS
         ]
 
         if content_syllables:
@@ -141,6 +162,48 @@ class AcousticAnalyzer:
         segment_speech_duration = min(segment.duration, segment_speech_duration)
         silence_duration = segment.duration - segment_speech_duration
         return (silence_duration / segment.duration)
+    
+    def _calculate_disfluency_metrics(self, segment: AudioSegment) -> Dict:
+        """Đo các chỉ số ngập ngừng tiếng Việt
+        
+        Disfluency = từ đệm thực sự (ờ, ừm, à...) + lặp từ
+        KHÔNG tính từ lịch sự (dạ, vâng, ạ) là disfluency
+        """
+        text = segment.text.lower()
+        if not text:
+            return {
+                'filler_count': 0,
+                'restart_count': 0,
+                'disfluency_rate': 0.0
+            }
+        
+        # Tokenize tiếng Việt
+        try:
+            words = word_tokenize(text, format="text").split()
+        except:
+            words = re.sub(r'[^\w\s]', ' ', text).split()
+        
+        total_words = len(words) if words else 1
+        
+        # 1. Đếm từ đệm THỰC SỰ (ờ, ừm, à, kiểu...)
+        # KHÔNG tính dạ, vâng, ạ là filler
+        filler_count = sum(1 for w in words if w in self.FILLER_WORDS)
+        
+        # 2. Phát hiện lặp từ (restart): "em em", "dạ dạ", "ờ ờ"
+        # Bỏ điều kiện len > 1 để phát hiện "ờ ờ", "ạ ạ"
+        restart_count = 0
+        for i in range(len(words) - 1):
+            if words[i] == words[i+1]:
+                restart_count += 1
+        
+        # 3. Tỷ lệ disfluency = (filler + restart) / tổng từ
+        disfluency_rate = (filler_count + restart_count) / total_words
+        
+        return {
+            'filler_count': int(filler_count),
+            'restart_count': int(restart_count),
+            'disfluency_rate': round(float(disfluency_rate), 3)
+        }
 
 
 class MetadataCalculator:
@@ -192,6 +255,116 @@ class MetadataCalculator:
     @staticmethod
     def _seg_end(seg: Dict) -> float:
         return float(seg.get('end', MetadataCalculator._seg_start(seg)))
+
+
+class SalesPerformanceAnalyzer:
+    """Phân tích tổng hợp hiệu suất Sales"""
+    
+    @staticmethod
+    def analyze_sales_segments(segments: List[Dict]) -> Dict:
+        """Tính các chỉ số tổng hợp từ các segment Sales"""
+        sales_segments = [s for s in segments if s['speaker'] == 'Sales']
+        
+        if not sales_segments:
+            return {}
+        
+        # 1. Tổng hợp disfluency
+        disfluency_rates = [s.get('disfluency_rate', 0) for s in sales_segments]
+        total_disfluency_rate = np.mean(disfluency_rates) if disfluency_rates else 0
+        # Ngưỡng 0.20 (20%) - phát hiện các đoạn ngập ngừng cao
+        high_disfluency_segments = [
+            {
+                'start': s['start_time'],
+                'text': s['text'][:80],
+                'rate': s.get('disfluency_rate', 0)
+            }
+            for s in sales_segments 
+            if s.get('disfluency_rate', 0) > 0.20
+        ]
+        
+        # 2. Biến động tốc độ
+        spms = [s['speed_spm'] for s in sales_segments if s['speed_spm'] > 0]
+        spm_mean = np.mean(spms) if spms else 0
+        spm_std = np.std(spms) if len(spms) > 1 else 0
+        fast_segments = [
+            {
+                'start': s['start_time'],
+                'text': s['text'][:80],
+                'spm': s['speed_spm']
+            }
+            for s in sales_segments 
+            if s['speed_spm'] > 220
+        ]
+        
+        
+        pitches = [s['pitch_hz'] for s in sales_segments if s['pitch_hz'] > 0]
+        pitch_std = np.std(pitches) if len(pitches) > 1 else 0
+        
+        
+        hesitant_responses = SalesPerformanceAnalyzer.analyze_question_responses(segments)
+        
+        return {
+            'sales_disfluency': {
+                'avg_rate': round(float(total_disfluency_rate), 3),
+                'high_segments': high_disfluency_segments[:3]
+            },
+            'sales_speed': {
+                'avg_spm': round(float(spm_mean), 1),
+                'spm_std': round(float(spm_std), 1),
+                'fast_segments': fast_segments[:3]
+            },
+            'sales_pitch': {
+                'pitch_std': round(float(pitch_std), 1)
+            },
+            'hesitant_responses': hesitant_responses
+        }
+    
+    @staticmethod
+    def analyze_question_responses(segments: List[Dict]) -> List[Dict]:
+        """Phát hiện các turn KH hỏi → Sales trả lời ngập ngừng"""
+        question_keywords = ['sao', 'như thế nào', 'thế nào', 'có được không', 
+                            'bao nhiêu', 'giá', 'tại sao', 'vì sao', 'có phải']
+        
+        hesitant_responses = []
+        
+        for i in range(len(segments) - 1):
+            current = segments[i]
+            next_seg = segments[i + 1]
+            
+            # Kiểm tra: Customer hỏi → Sales trả lời
+            if (current['speaker'] == 'Customer' and 
+                next_seg['speaker'] == 'Sales' and
+                any(kw in current['text'].lower() for kw in question_keywords)):
+                
+                # Đo độ trễ và chất lượng response
+                response_delay = next_seg['start_time'] - current['end_time']
+                response_disfluency = next_seg.get('disfluency_rate', 0)
+                
+                # Text bắt đầu bằng nhiều filler?
+                response_text = next_seg['text'].lower()
+                starts_with_filler = any(
+                    response_text.startswith(f"{filler} ") 
+                    for filler in ['ờ', 'ừm', 'à', 'em ờ', 'dạ ờ']
+                )
+                
+                # Đánh giá confidence
+                is_hesitant = (
+                    (response_delay > 1.5) or
+                    (response_disfluency > 0.15) or
+                    (starts_with_filler and response_disfluency > 0.10)
+                )
+                
+                if is_hesitant:
+                    hesitant_responses.append({
+                        'question_at': round(current['start_time'], 1),
+                        'question': current['text'][:100],
+                        'response_delay': round(response_delay, 2),
+                        'response_disfluency': round(response_disfluency, 3),
+                        'response_preview': next_seg['text'][:100],
+                        'starts_with_filler': starts_with_filler
+                    })
+        
+        return hesitant_responses
 
 
 class AudioFeatureExtractor:
@@ -252,11 +425,15 @@ class AudioFeatureExtractor:
         metadata_calculator = MetadataCalculator(dialogue_segments, sales_speaker_id)
         metadata = metadata_calculator.calculate()
         
+        # Thêm phân tích tổng hợp Sales
+        sales_performance = SalesPerformanceAnalyzer.analyze_sales_segments(segment_analysis)
+        
         return {
             'status': 1,
             'task_id': self.task_id,
             'segments': segment_analysis,
             'metadata': metadata,
+            'sales_performance': sales_performance,
             'message': 'Features and metadata extracted successfully'
         }
     

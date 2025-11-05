@@ -53,7 +53,7 @@ async def get_qa_evaluation(call_data: Dict[str, Any],
         if parent_span:
             prompt_span = parent_span.span(
                 name="build_prompt",
-                input={"call_data_keys": list(call_data.keys())}
+                input={"call_data": call_data}
             )
         
         logger.info("Building evaluation prompt...")
