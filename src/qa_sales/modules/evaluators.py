@@ -7,6 +7,7 @@ import json
 import os
 from ast import literal_eval
 from typing import List, Dict, Any
+from litellm import acompletion
 
 
 import pandas as pd
@@ -59,23 +60,14 @@ class ScriptEvaluator:
             tsv_path: Path to TSV file with criteria scores
         """
         logger.info(f"Initializing ScriptEvaluator with model: {model}")
-
-        self.llm = ChatOpenAI(
-            model=model,
-            temperature=0.0,
-            api_key=os.getenv("OPENAI_API_KEY"),
-            base_url=os.getenv("BASE_URL"),
-            callbacks=[DebugHandler()],
-        )
-        self.llm.client.raise_on_error = True
         # Load prompt templates
         with open(eval_prompt_template, "r", encoding="utf-8") as f:
             eval_prompt = f.read()
         with open(classify_prompt_template, "r", encoding="utf-8") as f:
             classify_prompt = f.read()
 
-        self.classify_prompt = PromptTemplate.from_template(classify_prompt)
-        self.eval_prompt = PromptTemplate.from_template(eval_prompt)
+        self.classify_prompt = classify_prompt
+        self.eval_prompt = eval_prompt
 
         # Load criteria scores from TSV
         df = pd.read_csv(tsv_path, delimiter="\t")
@@ -90,7 +82,7 @@ class ScriptEvaluator:
             f"✓ ScriptEvaluator initialized with {len(self.criteria_score)} criteria"
         )
 
-    def classify_utterances_to_criteria(
+    async def classify_utterances_to_criteria(
         self, utterances: List[Dict[str, Any]], trace=None, parent_span=None
     ) -> List[Dict[str, Any]]:
         """
@@ -127,12 +119,16 @@ class ScriptEvaluator:
             sale_texts=utterances, step_detail=self.step_detail
         )
 
-        logger.debug(f"Classify prompt (first 500 chars): {prompt_text[:500]}")
+        messages = [{"role": "user", "content": prompt_text}]
+        response = await acompletion(
+            model="gpt-4.1-mini",
+            messages=messages,
+            temperature=0.0,
+            api_key=os.getenv("OPENAI_API_KEY"),
+            base_url=os.getenv("BASE_URL"),
+        )
+        response_content = response.choices[0].message.content
 
-        # Invoke LLM
-        response = self.llm.invoke(prompt_text)
-        response_content = response.content
-        
         logger.info("=== LLM classify response received ===")
         logger.info(response_content)
         logger.info("======================================")
@@ -291,124 +287,115 @@ class ScriptEvaluator:
                 'message': Status message
             }
         """
+        logger.info("=" * 60)
+        logger.info("Starting sales script evaluation pipeline")
+        logger.info("=" * 60)
+
+        # ==========================================
+        # Step 1: Classify Utterances
+        # ==========================================
+        logger.info("Step 1: Classifying utterances to criteria...")
+
+        sale_texts = await self.classify_utterances_to_criteria(
+            utterances=dialogue, trace=trace, parent_span=parent_span
+        )
+
+        # ==========================================
+        # Step 2: Evaluate Each Criterion
+        # ==========================================
+        if parent_span:
+            eval_span = parent_span.span(
+                name="evaluate_criteria",
+                input={"num_classified_groups": len(sale_texts)},
+            )
+
+        logger.info("Step 2: Evaluating each criterion...")
+        self.eval_prompt = self.eval_prompt.format(
+            sale_texts=sale_texts, step_detail=self.step_detail
+        )
+        messages = [{"role": "user", "content": self.eval_prompt}]
+
+        response = await acompletion(
+            model="gpt-4.1-mini",
+            messages=messages,
+            temperature=0.0,
+            api_key=os.getenv("OPENAI_API_KEY"),
+            base_url=os.getenv("BASE_URL"),
+        )
+        response_content = response.choices[0].message.content
+
+        # Log to Langfuse
+        if trace and LANGFUSE_ENABLED:
+            token_usage = response.response_metadata.get("token_usage", {})
+            log_generation(
+                trace=trace,
+                name="llm_evaluate_criteria",
+                model=self.model,
+                input_data={
+                    "num_criteria_groups": len(sale_texts),
+                    "step_detail_length": len(self.step_detail),
+                },
+                output_data=response_content,
+                metadata={
+                    "step": "evaluate_sales_criteria",
+                    "evaluation_type": "sales_script",
+                    "temperature": 0.0,
+                },
+                usage={
+                    "prompt_tokens": token_usage.get("prompt_tokens", 0),
+                    "completion_tokens": token_usage.get("completion_tokens", 0),
+                    "total_tokens": token_usage.get("total_tokens", 0),
+                },
+            )
+
+        logger.info(
+            f"LLM evaluation response (first 500 chars):\n{response_content[:500]}"
+        )
+
+        # Parse evaluation results
         try:
-            logger.info("=" * 60)
-            logger.info("Starting sales script evaluation pipeline")
-            logger.info("=" * 60)
+            criteria_evals = literal_eval(response_content)
 
-            # ==========================================
-            # Step 1: Classify Utterances
-            # ==========================================
-            logger.info("Step 1: Classifying utterances to criteria...")
-
-            sale_texts = self.classify_utterances_to_criteria(
-                utterances=dialogue, trace=trace, parent_span=parent_span
-            )
-
-            # ==========================================
-            # Step 2: Evaluate Each Criterion
-            # ==========================================
             if parent_span:
-                eval_span = parent_span.span(
-                    name="evaluate_criteria",
-                    input={"num_classified_groups": len(sale_texts)},
+                eval_span.end(
+                    output={
+                        "status": "success",
+                        "num_criteria_evaluated": len(criteria_evals),
+                    }
                 )
 
-            logger.info("Step 2: Evaluating each criterion...")
+            logger.info(f"✓ Successfully evaluated {len(criteria_evals)} criteria")
 
-            chain = self.eval_prompt | self.llm
+        except (ValueError, SyntaxError) as parse_err:
+            error_msg = f"Failed to parse evaluation response: {parse_err}"
+            logger.error(error_msg)
+            logger.error(f"Raw response:\n{response_content}")
 
-            response = chain.invoke(
-                {"sale_texts": sale_texts, "step_detail": self.step_detail}
-            )
-
-            response_content = response.content
-
-            # Log to Langfuse
-            if trace and LANGFUSE_ENABLED:
-                token_usage = response.response_metadata.get("token_usage", {})
-                log_generation(
-                    trace=trace,
-                    name="llm_evaluate_criteria",
-                    model=self.model,
-                    input_data={
-                        "num_criteria_groups": len(sale_texts),
-                        "step_detail_length": len(self.step_detail),
-                    },
-                    output_data=response_content,
-                    metadata={
-                        "step": "evaluate_sales_criteria",
-                        "evaluation_type": "sales_script",
-                        "temperature": 0.0,
-                    },
-                    usage={
-                        "prompt_tokens": token_usage.get("prompt_tokens", 0),
-                        "completion_tokens": token_usage.get("completion_tokens", 0),
-                        "total_tokens": token_usage.get("total_tokens", 0),
-                    },
+            if parent_span:
+                eval_span.end(
+                    output={
+                        "status": "error",
+                        "error": str(parse_err),
+                        "raw_response_preview": response_content[:200],
+                    }
                 )
 
-            logger.info(
-                f"LLM evaluation response (first 500 chars):\n{response_content[:500]}"
-            )
-
-            # Parse evaluation results
-            try:
-                criteria_evals = literal_eval(response_content)
-
-                if parent_span:
-                    eval_span.end(
-                        output={
-                            "status": "success",
-                            "num_criteria_evaluated": len(criteria_evals),
-                        }
-                    )
-
-                logger.info(f"✓ Successfully evaluated {len(criteria_evals)} criteria")
-
-            except (ValueError, SyntaxError) as parse_err:
-                error_msg = f"Failed to parse evaluation response: {parse_err}"
-                logger.error(error_msg)
-                logger.error(f"Raw response:\n{response_content}")
-
-                if parent_span:
-                    eval_span.end(
-                        output={
-                            "status": "error",
-                            "error": str(parse_err),
-                            "raw_response_preview": response_content[:200],
-                        }
-                    )
-
-                return {"status": -1, "criteria_evals": [], "message": error_msg}
+            return {"status": -1, "criteria_evals": [], "message": error_msg}
 
             # ==========================================
             # Step 3: Calculate Scores
             # ==========================================
-            logger.info("Step 3: Calculating scores...")
+        logger.info("Step 3: Calculating scores...")
 
-            criteria_evals = self.score_and_response(
-                criteria_evals, self.criteria_score
-            )
+        criteria_evals = self.score_and_response(
+            criteria_evals, self.criteria_score
+        )
 
-            total_score = sum(c["score"] for c in criteria_evals)
+        total_score = sum(c["score"] for c in criteria_evals)
 
-            logger.info("=" * 60)
-            logger.info(f"✓ Script evaluation completed successfully")
-            logger.info(f"✓ Total score: {total_score:.2f}")
-            logger.info("=" * 60)
+        logger.info("=" * 60)
+        logger.info(f"✓ Script evaluation completed successfully")
+        logger.info(f"✓ Total score: {total_score:.2f}")
+        logger.info("=" * 60)
 
-            return {"status": 1, "criteria_evals": criteria_evals, "message": "Success"}
-
-        except Exception as e:
-            error_msg = f"Unexpected error in script evaluation: {str(e)}"
-            logger.error(error_msg, exc_info=True)
-
-            if parent_span:
-                error_span = parent_span.span(
-                    name="error_handling",
-                    input={"error": str(e), "error_type": type(e).__name__},
-                )
-                error_span.end(output={"status": "failed"})
-
-            return {"status": -1, "criteria_evals": [], "message": error_msg}
+        return {"status": 1, "criteria_evals": criteria_evals, "message": "Success"}

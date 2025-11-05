@@ -10,6 +10,7 @@ from src.qa_communicate.core.langfuse_config import (
 )
 from src.qa_communicate.evaluation.evaluator import get_qa_evaluation
 from src.qa_sales.modules.qa_evaluators import QASalesEvaluator
+import traceback
 
 
 class QAMainEvaluator:
@@ -179,56 +180,56 @@ class QAMainEvaluator:
         5. Calculate final score
         """
         span = None
-        try:
+        # try:
             # Create main span for sales evaluation
-            if trace:
-                span = log_span(
-                    trace=trace,
-                    name="evaluate_sales_skills",
-                    metadata={"task_id": task_id, "evaluation_type": "sales_skills"},
-                )
-
-            logger.info("Start evaluating sales skills...")
-
-            # Sub-step 1: Get dialogue (tracked inside qa_evaluator)
-
-            # Note: dialogue API call happens inside run_evaluate
-            # We'll track it by wrapping the call
-
-            result = await self.qa_evaluator.run_evaluate(
-                audio_bytes=audio_bytes, task_id=task_id, trace=trace, parent_span=span
+        if trace:
+            span = log_span(
+                trace=trace,
+                name="evaluate_sales_skills",
+                metadata={"task_id": task_id, "evaluation_type": "sales_skills"},
             )
 
-            if result["status"] != 1:
-                if span:
-                    span.end(output={"error": result.get("detail_result")})
-                return {
-                    "detail_result": result["detail_result"],
-                    "score": -1,
-                    "status": -1,
-                }
+        logger.info("Start evaluating sales skills...")
 
-            # End span with success
+        # Sub-step 1: Get dialogue (tracked inside qa_evaluator)
+
+        # Note: dialogue API call happens inside run_evaluate
+        # We'll track it by wrapping the call
+
+        result = await self.qa_evaluator.run_evaluate(
+            audio_bytes=audio_bytes, task_id=task_id, trace=trace, parent_span=span
+        )
+
+        if result["status"] != 1:
             if span:
-                span.end(
-                    output={
-                        "status": "success",
-                        "final_score": result["final_score"],
-                        "detail_result_preview": result["detail_result"],
-                    }
-                )
-
+                span.end(output={"error": result.get("detail_result")})
             return {
                 "detail_result": result["detail_result"],
-                "score": result["final_score"],
-                "status": 1,
+                "score": -1,
+                "status": -1,
             }
 
-        except Exception as e:
-            logger.error(f"Error evaluating sales skills: {e}")
-            if span:
-                span.end(output={"error": str(e)})
-            return {"detail_result": str(e), "score": -1, "status": -1}
+        # End span with success
+        if span:
+            span.end(
+                output={
+                    "status": "success",
+                    "final_score": result["final_score"],
+                    "detail_result_preview": result["detail_result"],
+                }
+            )
+
+        return {
+            "detail_result": result["detail_result"],
+            "score": result["final_score"],
+            "status": 1,
+        }
+
+        # except Exception as e:
+        #     logger.error(f"Error evaluating sales skills: {e}")
+        #     if span:
+        #         span.end(output={"error": str(e)})
+        #     return {"detail_result": str(e), "score": -1, "status": -1}
 
     async def run_evaluate(self, audio_bytes: bytes, task_id: int):
         """
@@ -336,6 +337,7 @@ class QAMainEvaluator:
 
         except Exception as e:
             logger.error(f"Error in run_evaluate: {e}")
+            logger.error(traceback.format_exc())
 
             if trace:
                 trace.update(

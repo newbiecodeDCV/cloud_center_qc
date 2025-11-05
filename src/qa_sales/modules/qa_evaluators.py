@@ -74,105 +74,101 @@ class QASalesEvaluator:
         4. Evaluate each criterion
         5. Calculate final score
         """
-        try:
-            # Sub-step 1: Get dialogue
-            if parent_span:
-                dialogue_span = parent_span.span(
-                    name="get_dialogue", input={"task_id": task_id}
-                )
-
-            logger.info("Getting dialogue from API...")
-            dialogue_result = await call_dialogue_api(
-                audio_bytes=audio_bytes, task_id=task_id
+        
+        # Sub-step 1: Get dialogue
+        if parent_span:
+            dialogue_span = parent_span.span(
+                name="get_dialogue", input={"task_id": task_id}
             )
 
-            if parent_span:
-                dialogue_span.end(
-                    output={
-                        "status": dialogue_result.get("status"),
-                        "segments": dialogue_result.get("dialogue", []),
-                    }
-                )
+        logger.info("Getting dialogue from API...")
+        dialogue_result = await call_dialogue_api(
+            audio_bytes=audio_bytes, task_id=task_id
+        )
 
-            if dialogue_result["status"] != 1:
-                return {
-                    "status": -1,
-                    "detail_result": "Failed to get dialogue from audio",
-                    "final_score": -1,
+        if parent_span:
+            dialogue_span.end(
+                output={
+                    "status": dialogue_result.get("status"),
+                    "segments": dialogue_result.get("dialogue", []),
                 }
-
-            # Sub-step 2: Preprocess dialogue (identify speakers)
-            if parent_span:
-                preprocess_span = parent_span.span(
-                    name="preprocess_dialogue",
-                    input={"raw_segments": dialogue_result["dialogue"]},
-                )
-
-            logger.info("Preprocessing dialogue (identifying speakers)...")
-            processed_result = await self.dialogue_processor(
-                dialogue=dialogue_result["dialogue"],
-                prompt_template=self.pre_prompt_template,
-                trace=trace,
-                parent_span=preprocess_span if parent_span else None,
             )
 
-            if parent_span:
-                preprocess_span.end(
-                    output={
-                        "status": processed_result.get("status"),
-                        "sales_segments": processed_result.get("dialogue", []),
-                    }
-                )
-
-            if processed_result["status"] != 1:
-                return {
-                    "status": -1,
-                    "detail_result": "Failed to process dialogue",
-                    "final_score": -1,
-                }
-
-            # Sub-step 3 & 4: Classify and evaluate (done in ScriptEvaluator)
-            if parent_span:
-                eval_span = parent_span.span(
-                    name="evaluate_sales_script",
-                    input={"sales_utterances": processed_result["dialogue"]},
-                )
-
-            logger.info("Evaluating sales script...")
-            results = await self.script_evaluator(
-                dialogue=processed_result["dialogue"],
-                trace=trace,
-                parent_span=eval_span if parent_span else None,
-            )
-
-            if parent_span:
-                eval_span.end(
-                    output={
-                        "status": results.get("status"),
-                        "criteria_evaluated": results.get("criteria_evals", []),
-                    }
-                )
-
-            if results["status"] != 1:
-                return {
-                    "status": -1,
-                    "detail_result": "Failed to evaluate dialogue",
-                    "final_score": -1,
-                }
-
-            # Sub-step 5: Format results
-            detail_result, final_score = self.process_result(
-                results=results["criteria_evals"]
-            )
-
-            logger.info(f"✓ Sales evaluation completed. Score: {final_score}")
-
+        if dialogue_result["status"] != 1:
             return {
-                "status": 1,
-                "detail_result": detail_result,
-                "final_score": final_score,
+                "status": -1,
+                "detail_result": "Failed to get dialogue from audio",
+                "final_score": -1,
             }
 
-        except Exception as e:
-            logger.error(f"Error in sales evaluation: {e}", exc_info=True)
-            return {"status": -1, "detail_result": str(e), "final_score": -1}
+        # Sub-step 2: Preprocess dialogue (identify speakers)
+        if parent_span:
+            preprocess_span = parent_span.span(
+                name="preprocess_dialogue",
+                input={"raw_segments": dialogue_result["dialogue"]},
+            )
+
+        logger.info("Preprocessing dialogue (identifying speakers)...")
+        processed_result = await self.dialogue_processor(
+            dialogue=dialogue_result["dialogue"],
+            prompt_template=self.pre_prompt_template,
+            trace=trace,
+            parent_span=preprocess_span if parent_span else None,
+        )
+
+        if parent_span:
+            preprocess_span.end(
+                output={
+                    "status": processed_result.get("status"),
+                    "sales_segments": processed_result.get("dialogue", []),
+                }
+            )
+
+        if processed_result["status"] != 1:
+            return {
+                "status": -1,
+                "detail_result": "Failed to process dialogue",
+                "final_score": -1,
+            }
+
+        # Sub-step 3 & 4: Classify and evaluate (done in ScriptEvaluator)
+        if parent_span:
+            eval_span = parent_span.span(
+                name="evaluate_sales_script",
+                input={"sales_utterances": processed_result["dialogue"]},
+            )
+
+        logger.info("Evaluating sales script...")
+        results = await self.script_evaluator(
+            dialogue=processed_result["dialogue"],
+            trace=trace,
+            parent_span=eval_span if parent_span else None,
+        )
+
+        if parent_span:
+            eval_span.end(
+                output={
+                    "status": results.get("status"),
+                    "criteria_evaluated": results.get("criteria_evals", []),
+                }
+            )
+
+        if results["status"] != 1:
+            return {
+                "status": -1,
+                "detail_result": "Failed to evaluate dialogue",
+                "final_score": -1,
+            }
+
+        # Sub-step 5: Format results
+        detail_result, final_score = self.process_result(
+            results=results["criteria_evals"]
+        )
+
+        logger.info(f"✓ Sales evaluation completed. Score: {final_score}")
+
+        return {
+            "status": 1,
+            "detail_result": detail_result,
+            "final_score": final_score,
+        }
