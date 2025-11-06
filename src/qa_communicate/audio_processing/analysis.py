@@ -4,6 +4,7 @@ import re
 from typing import List, Dict , Tuple 
 from src.qa_communicate.audio_processing.dialogue import call_dialogue_api
 from src.qa_communicate.core.utils import create_task_id
+from src.qa_communicate.audio_processing.speaker_validator import validate_and_fix_speakers
 from io import BytesIO
 from underthesea import word_tokenize
 
@@ -405,9 +406,20 @@ class AudioFeatureExtractor:
         if not dialogue_segments:
             return {'status': -1, 'message': 'API không trả về phân đoạn hội thoại nào.'}
         
-        # Tự động xác định Sales dựa trên tổng thời lượng nói
+        # BƯỚC 1: Tự động xác định Sales dựa trên thời lượng nói (preliminary)
         sales_speaker_id = self._identify_sales_speaker(dialogue_segments)
         self.sales_speaker_id = sales_speaker_id
+        
+        # BƯỚC 2: Gán nhãn Sales/Customer cho từng segment
+        for seg in dialogue_segments:
+            seg['speaker'] = 'Sales' if str(seg.get('speaker')) == str(sales_speaker_id) else 'Customer'
+        
+        # BƯỚC 3: VALIDATE VÀ FIX speaker labels dựa trên NỘI DUNG TEXT
+        dialogue_segments, validation_msg = validate_and_fix_speakers(dialogue_segments)
+        self.validation_message = validation_msg
+        
+        # Log validation result
+        print(validation_msg)
         
         # Load audio data
         audio_data, sample_rate = librosa.load(BytesIO(self.audio_bytes), sr=None, dtype=np.float32)
@@ -434,6 +446,10 @@ class AudioFeatureExtractor:
             'segments': segment_analysis,
             'metadata': metadata,
             'sales_performance': sales_performance,
+            'validation_info': {
+                'message': self.validation_message,
+                'speaker_labels_corrected': '⚠️' in self.validation_message
+            },
             'message': 'Features and metadata extracted successfully'
         }
     
@@ -444,15 +460,53 @@ class AudioFeatureExtractor:
         segment_analysis = []
         
         for i, seg_data in enumerate(dialogue_segments, start=1):
-            segment = AudioSegment(seg_data, sales_speaker_id)
-            acoustic_features = analyzer.analyze_segment(segment)
+            # Segment đã có label 'Sales'/'Customer' sau khi validate
+            # Không cần dùng AudioSegment để re-label
+            speaker_label = seg_data.get('speaker', 'unknown')
+            
+            start_time = float(seg_data.get('start', 0.0))
+            end_time = float(seg_data.get('end', start_time))
+            text = seg_data.get('text', '')
+            duration = end_time - start_time
+            word_count = len(text.split()) if text else 0
+            
+            # Tạo AudioSegment để analyze acoustics
+            # Nhưng dùng speaker_label đã được validate
+            start_sample = int(start_time * analyzer.sample_rate)
+            end_sample = int(end_time * analyzer.sample_rate)
+            segment_audio = analyzer.audio_data[start_sample:end_sample]
+            
+            # Analyze acoustic features
+            if duration >= 0.25 and word_count <= 3:
+                # Segment có vấn đề
+                acoustic_features = {
+                    'speed_spm': 0.0,
+                    'volume_db': 0.0,
+                    'pitch_hz': 0.0,
+                    'silence_ratio': 0.0,
+                    'filler_count': 0,
+                    'restart_count': 0,
+                    'disfluency_rate': 0.0
+                }
+            else:
+                # Tạo temporary AudioSegment object
+                temp_seg = type('obj', (object,), {
+                    'start_time': start_time,
+                    'end_time': end_time,
+                    'speaker_label': speaker_label,
+                    'text': text,
+                    'duration': duration,
+                    'word_count': word_count,
+                    'is_corrupted': lambda: False
+                })
+                acoustic_features = analyzer.analyze_segment(temp_seg)
 
             segment_analysis.append({
                 'segment': i,
-                'speaker': segment.speaker_label,
-                'start_time': segment.start_time,
-                'end_time': segment.end_time,
-                'text': segment.text,
+                'speaker': speaker_label,  # Dùng label đã validate
+                'start_time': start_time,
+                'end_time': end_time,
+                'text': text,
                 **acoustic_features
             })
         
