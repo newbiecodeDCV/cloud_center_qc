@@ -92,6 +92,7 @@ class QAMainEvaluator:
             data_for_llm = {
                 "metadata": analysis_result.get("metadata"),
                 "segments": analysis_result.get("segments"),
+                'sales_performance': analysis_result.get('sales_performance', {})
             }
 
             logger.info("Start evaluating communication quality with LLM...")
