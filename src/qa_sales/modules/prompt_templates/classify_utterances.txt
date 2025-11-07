@@ -7,7 +7,9 @@
 - Bước 5: Thực hiện các bước sau:
 	- Bước 5.1: Dựa vào thứ tự lời thoại, nội dung lời thoại và mô tả tiêu chí (criteria Description), xác định xem lời thoại nào ứng với tiêu chí nào. Chú ý: các tiêu được sắp xếp theo thứ tự từ đầu tới cuối của cuộc gọi
 	- Bước 5.2: Trả về output **chính xác theo định dạng bắt buộc dưới đây**. 
-	  Tuyệt đối **không được viết thêm bất kỳ ký tự, lời giải thích, hoặc văn bản nào khác ngoài kết quả JSON**.
+	  Lưu ý:
+	  - Tuyệt đối **không được viết thêm bất kỳ ký tự, lời giải thích, hoặc văn bản nào khác ngoài kết quả JSON**.
+	  - Tuyệt đối **không được bịa thêm tiêu chí mới, số lượng tiêu chí sau khi phân loại bắt buộc không được vượt quá số lượng tiêu chí được cung cấp**.
 
 	  ** Định dạng bắt buộc:
 	  {format_instructions}

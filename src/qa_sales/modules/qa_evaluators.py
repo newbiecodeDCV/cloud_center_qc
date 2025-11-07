@@ -47,7 +47,7 @@ class QASalesEvaluator:
             criteria_id = item["criteria_id"]
             criteria_name = self.criteria_name.get(criteria_id, "Unknown")
             status = "đạt" if item.get("status", 0) == 1 else "chưa đạt"
-            note = item.get("Note", "")
+            note = item.get("note", "")
             score = item.get("score", 0)
             final_score += score
 
