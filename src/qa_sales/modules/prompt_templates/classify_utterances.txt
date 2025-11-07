@@ -10,31 +10,7 @@
 	  Tuyệt đối **không được viết thêm bất kỳ ký tự, lời giải thích, hoặc văn bản nào khác ngoài kết quả JSON**.
 
 	  ** Định dạng bắt buộc:
-	  Kết quả phải là **một list hợp lệ của Python (hoặc JSON array)**, trong đó mỗi phần tử là một dictionary có đúng các trường sau:
-	  [
-	      {{
-		  "criteria_id": <số thứ tự của tiêu chí, dạng int>,
-		  "utterance": [
-		      <chuỗi text của câu thoại 1>,
-		      <chuỗi text của câu thoại 2>,
-		      ...
-		  ]
-	      }},
-	      {{
-		  "criteria_id": <số thứ tự của tiêu chí kế tiếp>,
-		  "utterance": [
-		      ...
-		  ]
-	      }},
-	      ...
-	  ]
-
-	  ** Lưu ý bắt buộc:
-	  - Không thêm bất kỳ nội dung nào ngoài danh sách JSON trên (không thêm câu, mô tả, tiêu đề, dấu ``` hoặc code block).
-	  - Đảm bảo JSON có thể parse trực tiếp bằng `json.loads()`.
-	  - Các `criteria_id` phải được sắp xếp theo thứ tự tăng dần.
-	  - Nếu không có câu thoại nào phù hợp với tiêu chí, bỏ qua tiêu chí đó
-		Lưu ý bắt buộc sắp xếp các tiêu chí theo thứ tự
+	  {format_instructions}
 
 [Sale Desc]: Lời thoại của nhân viên có dạng một list các python dictionary. Mỗi dictonary gồm những trường thông tin sau:  
         - start: Thời điểm bắt đầu,

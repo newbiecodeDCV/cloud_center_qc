@@ -8,7 +8,7 @@ import os
 from ast import literal_eval
 from typing import List, Dict, Any
 
-
+import traceback
 import pandas as pd
 from dotenv import load_dotenv
 from loguru import logger
@@ -16,6 +16,11 @@ from langchain_community.vectorstores import Chroma
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
+from langchain_core.output_parsers import PydanticOutputParser
+from src.qa_sales.modules.output_models import (
+    ClassifiedUtterancesResponse,
+    EvaluationResultResponse,
+)
 
 from src.qa_communicate.core.langfuse_config import log_generation, LANGFUSE_ENABLED
 
@@ -74,8 +79,8 @@ class ScriptEvaluator:
         with open(classify_prompt_template, "r", encoding="utf-8") as f:
             classify_prompt = f.read()
 
-        self.classify_prompt = PromptTemplate.from_template(classify_prompt)
-        self.eval_prompt = PromptTemplate.from_template(eval_prompt)
+        self.classify_prompt = classify_prompt
+        self.eval_prompt = eval_prompt
 
         # Load criteria scores from TSV
         df = pd.read_csv(tsv_path, delimiter="\t")
@@ -85,6 +90,12 @@ class ScriptEvaluator:
         self.step_detail = self.from_db_to_text(chroma_db=chroma_db)
 
         self.model = model
+        self.classify_output_parser = PydanticOutputParser(
+            pydantic_object=ClassifiedUtterancesResponse
+        )
+        self.eval_output_parser = PydanticOutputParser(
+            pydantic_object=EvaluationResultResponse
+        )
 
         logger.info(
             f"✓ ScriptEvaluator initialized with {len(self.criteria_score)} criteria"
@@ -123,18 +134,25 @@ class ScriptEvaluator:
             )
 
         # Build prompt từ template
-        prompt_text = self.classify_prompt.format(
-            sale_texts=utterances, step_detail=self.step_detail
+        prompt_text = PromptTemplate(
+            template=self.classify_prompt,
+            input_variables=["sale_texts", "step_detail"],
+            partial_variables={
+                "format_instructions": self.classify_output_parser.get_format_instructions()
+            },
         )
 
-        logger.debug(f"Classify prompt (first 500 chars): {prompt_text[:500]}")
-
         # Invoke LLM
+        prompt_text = await prompt_text.ainvoke(
+            {"sale_texts": utterances, "step_detail": self.step_detail}
+        )
         response = await self.llm.ainvoke(prompt_text)
-        response_content = response.content
-        
+        parsed_response = await self.classify_output_parser.ainvoke(response)
+        parsed_response = [
+            item.model_dump() for item in parsed_response.utterance_holders
+        ]
         logger.info("=== LLM classify response received ===")
-        logger.info(response_content)
+        logger.info(parsed_response)
         logger.info("======================================")
 
         # Log to Langfuse - LOG ĐÚNG PROMPT VÀ RESPONSE
@@ -146,7 +164,7 @@ class ScriptEvaluator:
                 model=self.model,
                 input_data=prompt_text,
                 # ✅ Input = Prompt thực tế
-                output_data=response_content,  # ✅ Output = Response từ LLM
+                output_data=parsed_response,  # ✅ Output = Response từ LLM
                 metadata={
                     "step": "classify_utterances_to_criteria",
                     "num_utterances": len(utterances),
@@ -161,33 +179,33 @@ class ScriptEvaluator:
             )
 
         # Parse response - try multiple parsers
-        sale_texts = None
+        sale_texts = parsed_response
         parse_error = None
 
-        for parse_fn in (json.loads, literal_eval):
-            try:
-                sale_texts = parse_fn(response_content)
-                logger.info(f"✓ Successfully parsed with {parse_fn.__name__}")
-                break
-            except Exception as e:
-                parse_error = e
-                logger.debug(f"Parser {parse_fn.__name__} failed: {e}")
+        # for parse_fn in (json.loads, literal_eval):
+        #     try:
+        #         sale_texts = parse_fn(response_content)
+        #         logger.info(f"✓ Successfully parsed with {parse_fn.__name__}")
+        #         break
+        #     except Exception as e:
+        #         parse_error = e
+        #         logger.debug(f"Parser {parse_fn.__name__} failed: {e}")
 
-        if sale_texts is None:
-            error_msg = f"Failed to parse classify response: {parse_error}"
-            logger.error(error_msg)
-            logger.error(f"Raw response:\n{response_content}")
+        # if sale_texts is None:
+        #     error_msg = f"Failed to parse classify response: {parse_error}"
+        #     logger.error(error_msg)
+        #     logger.error(f"Raw response:\n{response_content}")
 
-            if parent_span:
-                classify_span.end(
-                    output={
-                        "status": "error",
-                        "error": str(parse_error),
-                        "raw_response_preview": response_content[:200],
-                    }
-                )
+        #     if parent_span:
+        #         classify_span.end(
+        #             output={
+        #                 "status": "error",
+        #                 "error": str(parse_error),
+        #                 "raw_response_preview": response_content[:200],
+        #             }
+        #         )
 
-            raise RuntimeError(error_msg)
+        #     raise RuntimeError(error_msg)
 
         if parent_span:
             classify_span.end(
@@ -316,11 +334,19 @@ class ScriptEvaluator:
 
             logger.info("Step 2: Evaluating each criterion...")
 
-            eval_prompt = self.eval_prompt.format(
-                sale_texts=sale_texts, step_detail=self.step_detail
+            eval_prompt = PromptTemplate(
+                template=self.eval_prompt,
+                input_variables=["sale_texts", "step_detail"],
+                partial_variables={
+                    "format_instructions": self.eval_output_parser.get_format_instructions()
+                },
             )
-
+            eval_prompt = await eval_prompt.ainvoke(
+                {"sale_texts": sale_texts, "step_detail": self.step_detail}
+            )
             response = await self.llm.ainvoke(eval_prompt)
+            parsed_response = await self.eval_output_parser.ainvoke(response)
+            eval_results = [item.model_dump() for item in parsed_response.results]
 
             response_content = response.content
 
@@ -347,41 +373,17 @@ class ScriptEvaluator:
                         "total_tokens": token_usage.get("total_tokens", 0),
                     },
                 )
-
-            logger.info(
-                f"LLM evaluation response (first 500 chars):\n{response_content[:500]}"
-            )
-
             # Parse evaluation results
-            try:
-                criteria_evals = literal_eval(response_content)
+            criteria_evals = eval_results
+            if parent_span:
+                eval_span.end(
+                    output={
+                        "status": "success",
+                        "num_criteria_evaluated": len(criteria_evals),
+                    }
+                )
 
-                if parent_span:
-                    eval_span.end(
-                        output={
-                            "status": "success",
-                            "num_criteria_evaluated": len(criteria_evals),
-                        }
-                    )
-
-                logger.info(f"✓ Successfully evaluated {len(criteria_evals)} criteria")
-
-            except (ValueError, SyntaxError) as parse_err:
-                error_msg = f"Failed to parse evaluation response: {parse_err}"
-                logger.error(error_msg)
-                logger.error(f"Raw response:\n{response_content}")
-
-                if parent_span:
-                    eval_span.end(
-                        output={
-                            "status": "error",
-                            "error": str(parse_err),
-                            "raw_response_preview": response_content[:200],
-                        }
-                    )
-
-                return {"status": -1, "criteria_evals": [], "message": error_msg}
-
+            logger.info(f"✓ Successfully evaluated {len(criteria_evals)} criteria")
             # ==========================================
             # Step 3: Calculate Scores
             # ==========================================
@@ -403,6 +405,7 @@ class ScriptEvaluator:
         except Exception as e:
             error_msg = f"Unexpected error in script evaluation: {str(e)}"
             logger.error(error_msg, exc_info=True)
+            logger.error(traceback.format_exc())
 
             if parent_span:
                 error_span = parent_span.span(

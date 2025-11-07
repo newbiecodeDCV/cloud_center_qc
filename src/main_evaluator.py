@@ -92,7 +92,7 @@ class QAMainEvaluator:
             data_for_llm = {
                 "metadata": analysis_result.get("metadata"),
                 "segments": analysis_result.get("segments"),
-                'sales_performance': analysis_result.get('sales_performance', {})
+                "sales_performance": analysis_result.get("sales_performance", {}),
             }
 
             logger.info("Start evaluating communication quality with LLM...")
@@ -182,7 +182,7 @@ class QAMainEvaluator:
         """
         span = None
         # try:
-            # Create main span for sales evaluation
+        # Create main span for sales evaluation
         if trace:
             span = log_span(
                 trace=trace,

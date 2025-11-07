@@ -424,13 +424,14 @@ KHÔNG ĐƯỢC dùng các từ sau trong phần "ly_do":
    - KIỂM TRA KĨ CÁC SEGMENT ĐẦU DỰA VÀO LỜI THOẠI ĐỂ XEM CÓ PHÂN BIỆT NHẦM LỜI THOẠI CỦA SALES VÀ CUSTOMS NẾU THẤY SALE KHÔNG XƯNG DANH
 """
 
+
 def build_qa_prompt(call_data: dict) -> str:
-    """ Xây dựng prompt chấm điểm QA bằng cách chèn dữ liệu cuộc gọi vào template. """
+    """Xây dựng prompt chấm điểm QA bằng cách chèn dữ liệu cuộc gọi vào template."""
     call_data_str = json.dumps(call_data, indent=2, ensure_ascii=False)
-    
+
     # Thêm validation info
-    validation_info = call_data.get('validation_info', {})
-    if validation_info.get('speaker_labels_corrected'):
+    validation_info = call_data.get("validation_info", {})
+    if validation_info.get("speaker_labels_corrected"):
         validation_msg = f"""
 🚨 **HỆ THỐNG ĐÃ TỰ ĐỘNG SỮA LỖI PHÂN LOẠI SPEAKER:**
 {validation_info.get('message', '')}
@@ -440,8 +441,7 @@ def build_qa_prompt(call_data: dict) -> str:
 """
     else:
         validation_msg = "✅ Speaker labels đã được validate và hợp lệ."
-    
+
     return _QA_EVALUATION_TEMPLATE.format(
-        call_data_str=call_data_str,
-        validation_info=validation_msg
+        call_data_str=call_data_str, validation_info=validation_msg
     )

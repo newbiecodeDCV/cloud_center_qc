@@ -74,7 +74,7 @@ class QASalesEvaluator:
         4. Evaluate each criterion
         5. Calculate final score
         """
-        
+
         # Sub-step 1: Get dialogue
         if parent_span:
             dialogue_span = parent_span.span(

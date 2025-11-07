@@ -16,27 +16,7 @@
 		  Tuyệt đối **không được viết thêm bất kỳ ký tự, dấu ``` hoặc văn bản nào khác ngoài kết quả JSON hợp lệ**.
 
 		  ** Định dạng bắt buộc:
-		  Kết quả phải là **một list hợp lệ của Python (hoặc JSON array)**, trong đó mỗi phần tử là một dictionary có đúng ba trường sau:
-		  [
-		      {{
-			  "criteria_id": <số thứ tự của tiêu chí, dạng int>,
-			  "status": <1 nếu được đánh giá là 'Đạt', 0 nếu là 'Không đạt'>,
-			  "Note": "Các ý ghi dưới dạng gạch đầu dòng, mỗi ý một dòng, không dùng ngoặc. Trích dẫn kèm lời thoại làm căn cứ. Ví dụ:\n- Đã thực hiện hành động A\n- Còn thiếu hành động B\n- Diễn đạt đúng tinh thần tiêu chí"
-		      }},
-		      {{
-			  "criteria_id": <số thứ tự của tiêu chí kế tiếp>,
-			  "status": <1 hoặc 0>,
-			  "Note": "- Mô tả chi tiết theo từng gạch đầu dòng\n- Không có dấu ngoặc hoặc ký tự đặc biệt"
-		      }},
-		      ...
-		  ]
-
-		  ** Yêu cầu bắt buộc:
-		  - Không thêm bất kỳ mô tả, tiêu đề, markdown, dấu ``` hoặc text giải thích nào khác ngoài danh sách JSON trên.
-		  - Đảm bảo JSON có thể parse trực tiếp bằng `json.loads()`.
-		  - Các `criteria_id` phải được sắp xếp theo thứ tự tăng dần.
-		  - Trường "Note" phải luôn có, không được bỏ trống.
-		  - Nội dung trong "Note" chỉ được sử dụng dấu gạch đầu dòng (-), không có dấu ngoặc, không bao quanh bởi dấu nháy kép hoặc dấu ngoặc đơn
+		  {format_instructions}
 
 [Sale Desc]: Lời thoại của nhân viên được chia vào các tiêu chí tương ứng. Cấu trúc có dạng như sau:
 	Lời thoại của tiêu chí: <tên criteria>:
