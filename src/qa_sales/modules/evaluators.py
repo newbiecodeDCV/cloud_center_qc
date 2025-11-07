@@ -147,7 +147,7 @@ class ScriptEvaluator:
             {"sale_texts": utterances, "step_detail": self.step_detail}
         )
         response = self.llm.invoke(prompt_text)
-        parsed_response = await self.classify_output_parser.invoke(response)
+        parsed_response = self.classify_output_parser.invoke(response)
         parsed_response = [
             item.model_dump() for item in parsed_response.utterance_holders
         ]
