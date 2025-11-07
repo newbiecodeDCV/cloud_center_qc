@@ -143,11 +143,11 @@ class ScriptEvaluator:
         )
 
         # Invoke LLM
-        prompt_text = await prompt_text.ainvoke(
+        prompt_text = prompt_text.invoke(
             {"sale_texts": utterances, "step_detail": self.step_detail}
         )
-        response = await self.llm.ainvoke(prompt_text)
-        parsed_response = await self.classify_output_parser.ainvoke(response)
+        response = self.llm.invoke(prompt_text)
+        parsed_response = await self.classify_output_parser.invoke(response)
         parsed_response = [
             item.model_dump() for item in parsed_response.utterance_holders
         ]
@@ -341,11 +341,11 @@ class ScriptEvaluator:
                     "format_instructions": self.eval_output_parser.get_format_instructions()
                 },
             )
-            eval_prompt = await eval_prompt.ainvoke(
+            eval_prompt = eval_prompt.invoke(
                 {"sale_texts": sale_texts, "step_detail": self.step_detail}
             )
-            response = await self.llm.ainvoke(eval_prompt)
-            parsed_response = await self.eval_output_parser.ainvoke(response)
+            response = self.llm.invoke(eval_prompt)
+            parsed_response = self.eval_output_parser.invoke(response)
             eval_results = [item.model_dump() for item in parsed_response.results]
 
             response_content = response.content
