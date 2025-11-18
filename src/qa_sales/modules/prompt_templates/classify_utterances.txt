@@ -7,34 +7,10 @@
 - Bước 5: Thực hiện các bước sau:
 	- Bước 5.1: Dựa vào thứ tự lời thoại, nội dung lời thoại và mô tả tiêu chí (criteria Description), xác định xem lời thoại nào ứng với tiêu chí nào. Chú ý: các tiêu được sắp xếp theo thứ tự từ đầu tới cuối của cuộc gọi
 	- Bước 5.2: Trả về output **chính xác theo định dạng bắt buộc dưới đây**. 
-	  Tuyệt đối **không được viết thêm bất kỳ ký tự, lời giải thích, hoặc văn bản nào khác ngoài kết quả JSON**.
-
 	  ** Định dạng bắt buộc:
-	  Kết quả phải là **một list hợp lệ của Python (hoặc JSON array)**, trong đó mỗi phần tử là một dictionary có đúng các trường sau:
-	  [
-	      {{
-		  "criteria_id": <số thứ tự của tiêu chí, dạng int>,
-		  "utterance": [
-		      <chuỗi text của câu thoại 1>,
-		      <chuỗi text của câu thoại 2>,
-		      ...
-		  ]
-	      }},
-	      {{
-		  "criteria_id": <số thứ tự của tiêu chí kế tiếp>,
-		  "utterance": [
-		      ...
-		  ]
-	      }},
-	      ...
-	  ]
-
-	  ** Lưu ý bắt buộc:
-	  - Không thêm bất kỳ nội dung nào ngoài danh sách JSON trên (không thêm câu, mô tả, tiêu đề, dấu ``` hoặc code block).
-	  - Đảm bảo JSON có thể parse trực tiếp bằng `json.loads()`.
-	  - Các `criteria_id` phải được sắp xếp theo thứ tự tăng dần.
-	  - Nếu không có câu thoại nào phù hợp với tiêu chí, bỏ qua tiêu chí đó
-		Lưu ý bắt buộc sắp xếp các tiêu chí theo thứ tự
+	  {format_instructions}
+	- Lưu ý:
+	  + Chỉ được phép phân loại các câu vào một trong các tiêu chí được cung cấp ở mục [Criteria Detail]. Tuyệt đối KHÔNG ĐƯỢC PHÂN LOẠI VÀO TIÊU CHÍ NÀO KHÁC KHÔNG CÓ SẴN Ở [Criteria Detail]
 
 [Sale Desc]: Lời thoại của nhân viên có dạng một list các python dictionary. Mỗi dictonary gồm những trường thông tin sau:  
         - start: Thời điểm bắt đầu,

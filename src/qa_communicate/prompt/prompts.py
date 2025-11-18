@@ -11,6 +11,15 @@ sau đó đánh giá kỹ năng giao tiếp của Sales theo tiêu chí **NGHIÊ
 {call_data_str}
 ```
 
+# ⚠️ THÔNG TIN QUAN TRỌNG VỀ SPEAKER LABELS
+{validation_info}
+
+**LƯU Ý:**
+- Speaker labels đã được HỆ THỐNG TỰ ĐỘNG VALIDATE dựa trên nội dung text
+- Bạn KHÔNG CẦN kiểm tra lại xem đâu là Sales, đâu là Customer
+- Hãy tin tưởng vào label 'Sales'/'Customer' đã được cung cấp
+
+
 # TIÊU CHÍ ĐÁNH GIÁ (PHẢI TUÂN THỦ CHẶT CHẼ)
 ## TIÊU CHÍ 1: CHÀO/XƯNG DANH
 
@@ -416,7 +425,24 @@ KHÔNG ĐƯỢC dùng các từ sau trong phần "ly_do":
    - KIỂM TRA KĨ CÁC SEGMENT ĐẦU DỰA VÀO LỜI THOẠI ĐỂ XEM CÓ PHÂN BIỆT NHẦM LỜI THOẠI CỦA SALES VÀ CUSTOMS NẾU THẤY SALE KHÔNG XƯNG DANH
 """
 
+
 def build_qa_prompt(call_data: dict) -> str:
-    """ Xây dựng prompt chấm điểm QA bằng cách chèn dữ liệu cuộc gọi vào template. """
+    """Xây dựng prompt chấm điểm QA bằng cách chèn dữ liệu cuộc gọi vào template."""
     call_data_str = json.dumps(call_data, indent=2, ensure_ascii=False)
-    return _QA_EVALUATION_TEMPLATE.format(call_data_str=call_data_str)
+
+    # Thêm validation info
+    validation_info = call_data.get("validation_info", {})
+    if validation_info.get("speaker_labels_corrected"):
+        validation_msg = f"""
+🚨 **HỆ THỐNG ĐÃ TỰ ĐỘNG SỮA LỖI PHÂN LOẠI SPEAKER:**
+{validation_info.get('message', '')}
+
+→ Tất cả segments hiện tại đã được phân loại ĐÚNG.
+→ Bạn CHỈ CẦN đánh giá dựa trên segments 'Sales' hiện tại.
+"""
+    else:
+        validation_msg = "✅ Speaker labels đã được validate và hợp lệ."
+
+    return _QA_EVALUATION_TEMPLATE.format(
+        call_data_str=call_data_str, validation_info=validation_msg
+    )
